@@ -72,20 +72,50 @@ producing
 build\bundle\AiBgRemover.ofx.bundle\Contents\Win64\AiBgRemover.ofx
 ```
 
-**Verify the exports before installing** (a missing export is the #1 reason an OFX plugin silently
-does not appear):
+### Verify the binary before installing
+
+Do this every time, from an **x64 Native Tools Command Prompt**. A wrong export table is the single
+most common reason an OFX plugin silently does not appear, and it is invisible from inside Resolve.
 
 ```bat
-dumpbin /exports build\bundle\AiBgRemover.ofx.bundle\Contents\Win64\AiBgRemover.ofx | findstr /i "Ofx"
+set OFX=build\bundle\AiBgRemover.ofx.bundle\Contents\Win64\AiBgRemover.ofx
+
+dumpbin /exports %OFX% | findstr /i "Ofx"
+dumpbin /dependents %OFX%
 ```
 
-Expect exactly:
+**`/exports` must show exactly these two names, spelled plainly:**
 
 ```
-OfxGetPluginIDs
+OfxGetNumberOfPlugins
 OfxGetPlugin
-OfxSetHost
 ```
+
+Three things to check, all of which have bitten real plugins:
+
+- **No leading underscore and no `@n` suffix.** `_OfxGetPlugin@4` means the definition did not match
+  the `extern "C"` declaration in `ofxCore.h`, so the host cannot find it by name. Resolve will load
+  the binary and then report that it contains no plugins.
+- **`OfxGetNumberOfPlugins`, not `OfxGetPluginIDs`.** The former is the current OFX 1.x entry point
+  (`ofxCore.h:650`); the latter is from a much older API revision and Resolve does not look for it.
+- **`OfxSetHost` is deliberately absent.** It is an optional export added in 2020 (`ofxCore.h:661`).
+  A host that finds it calls it first and treats a `kOfxStatFailed` return as *"skip this plugin
+  silently"*. The configuration known to work in Resolve Free 21.1 exports only the two functions
+  above and receives the host pointer through `OfxPlugin::setHost` instead. See doc 03 §D10. If you
+  ever add it, return `kOfxStatOK` unconditionally.
+
+**`/dependents` should list `KERNEL32.dll` and nothing else**, because the build links the MSVC
+runtime statically (`OFX_STATIC_CRT=ON`). If you see `VCRUNTIME140.dll`, `MSVCP140.dll` or
+`api-ms-win-crt-*.dll`, the static-CRT property did not apply — the plugin will then fail to load on
+any machine without the matching redistributable, which presents as "works on my machine, missing in
+Resolve". Fix it before chasing anything else:
+
+```bat
+cmake -S . -B build -DOFX_STATIC_CRT=ON
+```
+
+Both checks are also worth re-running after any change to `plugin/OfxEntry.cpp`, since that is the
+only translation unit defining an exported symbol.
 
 ---
 
@@ -111,7 +141,8 @@ Rename-Item "$sup\OFXPluginCacheV2.xml" "OFXPluginCacheV2.xml.old" -ErrorAction 
 ```
 
 Then check, in order: (a) is it the `.ofx.bundle` *folder* in the right place, (b) does `dumpbin`
-show all three exports, (c) is the plugin enabled in Video Plugins, (d) does
+show the two undecorated exports and only `KERNEL32.dll` as a dependent (§2), (c) is the plugin
+enabled in Video Plugins, (d) does
 `%ProgramData%\<Vendor>\AiBgRemover\log.txt` show a load attempt. Also note that `OFX_PLUGIN_PATH`,
 if set on your system, is searched *before* the default folder — check it is not shadowing anything.
 
@@ -191,30 +222,69 @@ excluded until V10 is resolved; RMBG-* is excluded permanently (non-commercial).
 
 ## 6. Running the tests
 
+### 6.1 Unit tests — working now
+
+No GPU, no ONNX Runtime, no Resolve, no network needed:
+
 ```bat
-:: unit tests (no GPU, no ONNX Runtime, no Resolve needed)
 ctest --test-dir build -C RelWithDebInfo --output-on-failure
 
-:: sanitiser build
-cmake -S . -B build-asan -G Ninja -DCMAKE_BUILD_TYPE=Debug -DOFX_SANITIZERS=ON ^
-      -DOPENFX_SDK_DIR="D:/DavinciCoding/OpenFX/openfx"
-cmake --build build-asan && ctest --test-dir build-asan --output-on-failure
-
-:: headless OFX host harness: loads the real plugin, feeds synthetic frames, checks alpha
-build\hostharness\ofx_harness.exe --plugin build\AiBgRemover.ofx --case passthrough_float
-build\hostharness\ofx_harness.exe --plugin build\AiBgRemover.ofx --case passthrough_byte
-
-:: inference benchmark (needs onnxruntime.dll + a model)
-build\bench\bench.exe --model "%ProgramData%\<Vendor>\AiBgRemover\models\birefnet_lite_512.onnx" ^
-                      --eps cpu,dml,cuda --res 384,512,768,1024 --frames 20 --report bench.md
-
-:: leak check on Windows
-"C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\appverif.exe"   :: enable Heaps + Locks for Resolve.exe? NO -
-:: instead run the harness under Application Verifier, and use _CrtSetDbgFlag in Debug builds
+:: or run the binary directly; an argument filters by substring
+build\aibgr_tests.exe
+build\aibgr_tests.exe premultiply
 ```
 
-I can run the first two of those here on Linux and report actual output. The `bench.exe` and
-harness-on-Windows runs are yours.
+**Actually measured in this environment** (GCC 12.2, Linux x64 — the same source builds under MSVC):
+
+```
+116 test(s) run, 0 check(s) failed
+```
+
+The same 116 checks pass under AddressSanitizer + UndefinedBehaviorSanitizer with leak detection
+enabled, so the host-agnostic layers are clean on memory errors, undefined behaviour and leaks:
+
+```bat
+cmake -S . -B build-asan -DCMAKE_BUILD_TYPE=Debug -DOFX_SANITIZERS=ON ^
+      -DOPENFX_SDK_DIR="D:/DavinciCoding/OpenFX/openfx"
+cmake --build build-asan --target aibgr_tests
+ctest --test-dir build-asan --output-on-failure
+```
+
+`OFX_SANITIZERS` is GCC/Clang only. On MSVC use `/fsanitize=address` by hand, or
+`_CrtSetDbgFlag(_CRTDBG_ALLOC_MEM_DF | _CRTDBG_LEAK_CHECK_DF)` in a Debug build.
+
+What the suites cover, mapped to the acceptance criteria in §9 of the brief:
+
+| Suite | Criterion it protects |
+|---|---|
+| `test_pixel_convert` | RGBA and all four bit depths; Byte/Short are integers, not floats |
+| `test_premultiply` | "No unintended black backgrounds"; zero-alpha recovers as black, not as a bright halo |
+| `test_colorspace` | **"No colour shifts"** — display-referred is an exact no-op, and the transform never reaches the output |
+| `test_float_image`, `test_matte` | "Avoid per-frame allocations"; grow-only capacity is asserted across a 50-frame loop |
+| `test_resize` | "Preserve fine detail"; bicubic stays inside [0,1] on a step edge, area downscale conserves the mean |
+| `test_compositor` | Correct alpha in all four output modes; pass-through output is bit-identical |
+| `test_placeholder_matte` | "Correct behaviour when models are unavailable" |
+| `test_pipeline` | End-to-end: disabled = exact copy, thumbnails never run the model, abort cancels, a failing model degrades to pass-through and still succeeds, odd and non-square resolutions |
+| `test_pipeline_settings` | Defaults actually do the job; NaN and infinity survive `sanitise()` |
+
+### 6.2 Not built yet
+
+These are in the plan (doc 04) but do not exist in the repository, so the commands below are
+aspirational until the phase that produces them lands. Do not expect them to run.
+
+```bat
+:: headless OFX host harness (Phase 2 follow-up): loads the real .ofx, feeds synthetic frames
+build\hostharness\ofx_harness.exe --plugin build\AiBgRemover.ofx --case passthrough_float
+
+:: inference benchmark (Phase 3): needs onnxruntime.dll plus a model
+build\bench\bench.exe --model "%ProgramData%\<Vendor>\AiBgRemover\models\birefnet_lite_512.onnx" ^
+                      --eps cpu,dml,cuda --res 384,512,768,1024 --frames 20 --report bench.md
+```
+
+The SDK's own `HostSupport` test host cannot be used for the harness: it links `expat::expat`
+publicly, and no expat development headers are assumed on your machine. The harness will call
+`OfxSetHost` / `OfxGetNumberOfPlugins` / `OfxGetPlugin` directly, which is also a closer match to
+what Resolve does (doc 03 §D10).
 
 ---
 
@@ -248,7 +318,7 @@ Save results into `docs/test-results/phaseN.md` — a real record, not a claim.
 ## 8. Things that will bite, pre-emptively noted
 
 1. **Missing `__declspec(dllexport)` on the three `Ofx*` entry points** → plugin does not appear, no
-   error. Always `dumpbin /exports` first.
+   error. Always `dumpbin /exports` and `dumpbin /dependents` first (§2).
 2. **`.ofx` is a renamed DLL** — the CMake target must set `SUFFIX ".ofx"` and `PREFIX ""`, or Resolve
    will not find it.
 3. **Bundle layout** must be `<Name>.ofx.bundle/Contents/Win64/<Name>.ofx`. A loose `.ofx` is ignored.

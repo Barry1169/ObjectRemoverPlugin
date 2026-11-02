@@ -142,9 +142,15 @@ temporal coherence from this.
 
 ## D6 — Build system: own CMake, SDK by path, no package manager
 
-**Decision.** Standalone CMake project. `-DOPENFX_SDK_DIR=D:/DavinciCoding/OpenFX/openfx`. Compile
-`Support/Library/*.cpp` into our own `OfxSupport` static target. **No Conan, no vcpkg, no
-`add_subdirectory()` of the SDK.** ONNX Runtime is *not* a CMake dependency at all (D1).
+**Decision.** Standalone CMake project. `-DOPENFX_SDK_DIR=D:/DavinciCoding/OpenFX/openfx`.
+**No Conan, no vcpkg, no `add_subdirectory()` of the SDK.** ONNX Runtime is *not* a CMake dependency
+at all (D1).
+
+> **Amended by D10.** This decision originally also said "compile `Support/Library/*.cpp` into our own
+> `OfxSupport` static target". That clause is withdrawn: the plugin uses the raw OFX C API and its own
+> thin helper layer in `plugin/`, so **no SDK source file is compiled at all**. `OPENFX_SDK_DIR` is
+> now used for its `include/` directory and nothing else. Everything else in D6 stands, and the
+> amendment strictly reduces what the build depends on.
 
 **Evidence this is safe** (doc 01 §4.2): `Support/Library/CMakeLists.txt` has no Conan reference and
 no expat dependency; the top-level SDK CMake only requires `opengl_system`/`cimg`/`spdlog` when
@@ -213,3 +219,83 @@ application down and — per the Blackmagic forum threads — Resolve will then 
 and rewrite `OFXPluginCacheV2.xml`. Degrading visibly is recoverable; crashing is not. Your brief
 asks for exactly this ("Handle missing models and inference errors gracefully", "Correct behavior
 when AI models are unavailable").
+
+---
+
+## D10 — Raw OFX C API, not the SDK's C++ support library
+
+**Decision.** Implement the plugin against the **raw OFX C API**: export `OfxGetNumberOfPlugins` and
+`OfxGetPlugin`, hand-write `pluginMain`'s action dispatch, and put our own thin helpers in `plugin/`
+(`HostBridge`, `Props`, `ParamDefs`, `ParamValues`, `OfxImageAdapter`). **Compile no file from
+`Support/Library`.** This supersedes the `OfxSupport` static target clause of D6.
+
+**Evidence.**
+
+1. `docs/reference/OpenFX_Resolve_From_Scratch.pdf` is a tested record of the raw route working on the
+   *exact* target machine — Windows 11, Resolve 21, MSVC, static CRT. It loads, it exposes a
+   parameter, and it renders. The support library has no equivalent record for Resolve Free 21.
+2. `Support/Library` is roughly 10k lines of C++ we would link but not control, and it throws
+   `OFX::Exception` types across the host boundary — the opposite of D9.
+3. `Support/HostSupport` links `expat::expat` publicly. Building any part of the SDK's CMake tree
+   therefore drags in a public XML dependency for a test host we do not need.
+4. The support library's own `setSequentialRender(bool)` writes `int(v)`, so it can only ever express
+   0 or 1. D5 needs the value **2** ("best rendered sequentially, still correct if not",
+   `ofxImageEffect.h:887`), which requires writing the property directly.
+
+**Cost.** We re-implement what `mDeclarePluginActions` and `OFX::ImageEffect` give for free: property
+getters/setters, the action switch, clip and image handles. That is `plugin/HostBridge.cpp` and
+`plugin/BgRemoverPlugin.cpp` — about 1200 lines, all of it code we would otherwise have to read anyway
+to debug host interactions.
+
+**Consequences we honour by hand** (each one is a place the support library would have protected us,
+so each is called out in the code that implements it):
+
+| Rule | Where it is honoured |
+|---|---|
+| `CreateInstance` / `DestroyInstance` return `kOfxStatOK`, **never** `kOfxStatReplyDefault` | `pluginMain` in `BgRemoverPlugin.cpp` |
+| `setHost` only stores the pointer; no OFX call happens there | `OfxEntry.cpp` → `HostBridge::storeHost` |
+| Suites are fetched on `kOfxActionLoad`, not before | `HostBridge::acquireSuites` |
+| No C++ exception reaches the host | `try`/`catch(...)` around the whole of `pluginMain` |
+| Render actions use `paramGetValueAtTime`, never `paramGetValue` (`ofxParam.h:1128`) | `ParamReader` only exposes the `AtTime` form |
+| `rowBytes` may be negative | `OfxImageInfo::pixelAddress` uses `ptrdiff_t` |
+| `paramDefine`'s third out-param is a **property set**, not a param handle (`ofxParam.h:1055`) | `Definer::define` in `ParamDefs.cpp` |
+
+The first of these is not a style preference. The field guide records that answering `CreateInstance`
+with `kOfxStatReplyDefault` makes Resolve Free report *"No parameter is exposed to user or OFX Plugin
+[id] is not available"*, cycle create/destroy about 120 times, and never call `Render` at all.
+
+**Rejected alternative.** Using the support library and accepting the expat dependency plus the
+exception-boundary mismatch. It would have saved the ~1200 lines above, but it would have put an
+untested-in-Resolve-21 code path between us and the one behaviour the guide proves works.
+
+---
+
+## D11 — `backgroundTransparency` means "how transparent the background becomes"
+
+**Decision.** `backgroundTransparency` ∈ [0,1] is the transparency the removed background is given,
+so the alpha handed to background pixels in Composite mode is `bgRetain = 1 - backgroundTransparency`.
+**The default is 1.0** (background fully removed). 0.0 leaves the frame untouched.
+
+Consequences, all pinned by tests in `tests/test_compositor.cpp`:
+
+- `isPassThrough()` is true for Composite when `backgroundTransparency <= 0`, not when it is `>= 1`.
+- **Background Only ignores the control entirely** and writes `A = 1 - matte`. It is a preview of what
+  was removed; scaling it by `bgRetain` would make it an empty frame at the default setting, which
+  would look like a broken control.
+- Foreground Only and Matte Only ignore it too.
+
+**Why this is recorded as a decision.** The first implementation had the polarity the other way round,
+with a default of 0.0. Under `bgRetain = 1 - t` that default made Composite write `A = a + 1·(1-a) = 1`
+with the source RGB — an exact pass-through. **A freshly installed plugin would have done nothing at
+all**, and every unit test that constructed a `PipelineSettings` would have exercised the fast path
+instead of the pipeline. It was caught by `tests/test_compositor.cpp` asserting the default rather than
+assuming it, which is the reason that assertion exists.
+
+The direction also matches the convention artists already know from chroma keyers: raising the
+tolerance-style control removes *more*, and the inspector hint for `fallbackKeyTolerance` is written to
+match ("raise it if too much background survives").
+
+A non-finite value from a broken keyframe falls back to **1.0**, not 0.0 — a NaN should still do the
+plugin's job rather than silently disable it. `PipelineSettings::sanitise()` replaces non-finite values
+*before* clamping, because `std::min`/`std::max` fold a NaN into whichever bound they compare against
+and the fallback would otherwise never run.

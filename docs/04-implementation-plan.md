@@ -23,7 +23,7 @@ back to me.
 | `models/` discovery, registry, LRU cache | 🟢 | 🟢 (with a stub session) | — | — |
 | `inference/ort/` loader & EP policy | 🟢 | 🟢 **against a stub `onnxruntime` shared library that I write** — proves the symbol resolution, API-table versioning, CUDA/DML probing and fallback chain logic | ❌ no real ORT, no GPU | — |
 | `inference/` segmenters (pre/post-processing) | 🟢 | 🟢 (golden tensors captured from a Python reference run **by you**, or hand-computed) | ❌ | — |
-| `plugin/` OFX layer | 🟢 compiles against the real SDK on Linux (`.so`) | 🟢 via a **headless OFX host harness** built from the SDK's `HostSupport` | ❌ | — |
+| `plugin/` OFX layer | 🟢 compiles against the real SDK headers on Linux, produces a `.ofx` with the right exports | ⚠️ only via a **hand-written** headless host that calls `OfxSetHost`/`OfxGetNumberOfPlugins`/`OfxGetPlugin`. The SDK's `HostSupport` cannot be used: it links `expat::expat` publicly. **Not built yet.** | ❌ | — |
 | Windows `.ofx` binary, MSVC | ❌ | ❌ | ❌ | 🟡 you |
 | DirectML / CUDA execution | ❌ | ❌ | ❌ | 🟡 you |
 | Resolve Free inspector, playback, render | ❌ | ❌ | ❌ | 🔴 you |
@@ -53,6 +53,11 @@ Two enabling steps make the 🟢 column real:
 **Done when:** the project configures and builds an empty plugin target on Linux; the probe scripts
 exist for you to run.
 
+> **Status — partly done.** 0.3, 0.4 (except `Semaphore`/`FixedPool`) and 0.5 are 🟢 **done and
+> verified**: the project configures, `aibgr_core` and the `.ofx` both build warning-free, and 116
+> unit checks pass (also clean under ASan + UBSan). **0.1 and 0.2 are not written** — they need your
+> machine, and V4/V5/V6 stay open until you run them.
+
 ---
 
 ## Phase 1 — OFX plugin skeleton that Resolve can see  🟢🟡🔴
@@ -61,13 +66,20 @@ exist for you to run.
 
 | # | Task | Verify |
 |---|---|---|
-| 1.1 | `plugin/OfxEntry.cpp` — `OfxGetPluginIDs`, `OfxGetPlugin`, `OfxSetHost` with correct MSVC `__declspec(dllexport)` (via an `OFX_EXPORT` macro that is `__declspec(dllexport)` on MSVC and `visibility("default")` elsewhere) | 🟢 compiles; 🟡 `dumpbin /exports` shows all three |
-| 1.2 | Plugin factory: context `General`, single input clip `Source`, output clip `Output`; declare RGBA + Byte/Short/Half/Float; `setSupportsTiles(false)`; `setSupportsMultiResolution(true)`; request sequential render **value 2 by writing `kOfxImageEffectInstancePropSequentialRender` directly** (the support library's `setSequentialRender(bool)` can only write 0/1 — doc 01 §4.4); `setOverlayInteractDescriptor` stub | 🟢 |
+| 1.1 | `plugin/OfxEntry.cpp` — export **`OfxGetNumberOfPlugins` and `OfxGetPlugin`** using the SDK's own `OfxExport` macro (`__declspec(dllexport)` on Windows, `visibility("default")` elsewhere). `OfxSetHost` is deliberately **not** exported — see doc 03 §D10. Note this row originally said `OfxGetPluginIDs` and "all three exports"; both were wrong. | 🟢 compiles and exports verified on Linux via `nm -D`; 🟡 `dumpbin /exports` + `/dependents` on Windows (doc 05 §2) |
+| 1.2 | Plugin factory: contexts `Filter` **and** `General` (the field guide records Resolve putting a timeline effect in `Filter`, not `General`), single input clip `Source`, output clip `Output`; declare RGBA + Byte/Short/Half/Float; `setSupportsTiles(false)`; `setSupportsMultiResolution(true)`; request sequential render **value 2 by writing `kOfxImageEffectInstancePropSequentialRender` directly** (the support library's `setSequentialRender(bool)` can only write 0/1 — doc 01 §4.4); `setOverlayInteractDescriptor` stub | 🟢 |
 | 1.3 | **Pass-through render**: copy src→dst honouring bit depth, `rowBytes`, bounds, and `renderWindow`; null-src → transparent black; `isIdentity()` returns the source clip when `enable` is false | 🟢 via host harness: synthetic frame in, byte-identical frame out, all four bit depths |
-| 1.4 | `HostCompat` diagnostic dump on first load, read straight from `OFX::ImageEffectHostDescription`: `hostName`/`versionLabel`, `APIVersionMajor.Minor`, `sequentialRender`, `supportsStrChoice`, `supportsRenderQualityDraft`, `supportsTiles`, `supportsMultipleClipDepths/PARs`, `supportsCudaRender`/`supportsCudaStream`, `maxParameters`, `maxPages`, `pageRowCount`, `pageColumnCount`, available suites. Also log the raw render in-args each call at Verbose, to see whether Resolve sets `ThumbnailRender`/`NoSpatialAwareness` (not plumbed into `RenderArguments`). | 🟢 logs; 🔴 **you read the log from Resolve** → closes **V7, V14**, and tells us whether Phase 9 is even possible |
+| 1.4 | `HostBridge` diagnostic dump on first load, reading the same host property list as the SDK's own `fetchHostDescription` (`Support/Library/ofxsImageEffect.cpp:1840-1924`): `hostName`/`versionLabel`, `APIVersionMajor.Minor`, `sequentialRender`, `supportsStrChoice`, `supportsRenderQualityDraft`, `supportsTiles`, `supportsMultipleClipDepths/PARs`, `supportsCudaRender`/`supportsCudaStream`, `maxParameters`, `maxPages`, `pageRowCount`, `pageColumnCount`, available suites. Also log the raw render in-args each call at Verbose, to see whether Resolve sets `ThumbnailRender`/`NoSpatialAwareness` (not plumbed into `RenderArguments`). | 🟢 logs; 🔴 **you read the log from Resolve** → closes **V7, V14**, and tells us whether Phase 9 is even possible |
 | 1.5 | Minimal params: `enable`, `outputMode`, plus the `Diagnostics` tab. Inspector layout adapts to the host's reported `maxPages`/page grid (fall back from Page params to nested Groups if the host cannot lay out six tabs). | 🟢 |
 | 1.6 | CMake install rule producing `AiBgRemover.ofx.bundle/Contents/Win64/AiBgRemover.ofx` | 🟢 layout check on Linux; 🟡 on Windows |
 | 1.7 | `docs/BUILD-WINDOWS.md` finalised with your actual generator name from 0.1 | 🟡 |
+
+> **Status — 🟢 parts done, 🔴 gate still closed.** 1.1–1.6 are written and compile here; the built
+> `.ofx` exports exactly `OfxGetNumberOfPlugins` and `OfxGetPlugin`, undecorated. 1.4's probe is
+> implemented and logs four `host:` capability lines at load. **The Phase 1 gate has NOT been passed**:
+> nothing has been built with MSVC and nothing has been loaded by Resolve. V1 is closed only because
+> *you* confirmed it and because the supplied field guide records a third-party raw-C-API plugin
+> loading and rendering in Resolve Free 21; V7 and V14 remain open until you read the log.
 
 **Done when (🔴 — the gate):** you build with MSVC, copy the bundle to
 `C:\Program Files\Common Files\OFX\Plugins`, restart Resolve Free, and
@@ -87,9 +99,20 @@ Prove every pixel-format and colour claim before a model is anywhere near it.
 | 2.2 | `core/Premultiply` — premult ⇄ straight with epsilon guard | 🟢 tests: double-premul detection, zero-alpha safety |
 | 2.3 | `core/ColorSpace` — sRGB/Rec709/Linear/Log transforms, applied to scratch only | 🟢 tests: identity round-trip within tolerance; **assert composited RGB is bit-identical to source RGB** |
 | 2.4 | `composite/Compositor` — all four output modes + `backgroundTransparency` + `matteInvert` | 🟢 tests driven by a **synthetic analytic matte** (e.g. a soft-edged disc) — no AI needed |
-| 2.5 | `OfxImageAdapter` — OFX::Image ⇄ ImageView across stride/bounds/window | 🟢 via harness |
+| 2.5 | `OfxImageAdapter` — OFX image ⇄ `FloatImage` across stride/bounds/window, all four bit depths and all three component sets, negative `rowBytes` | 🟢 compiles; the conversion maths is covered by `test_pixel_convert` and `test_premultiply`. ⚠️ the OFX property-reading path itself is **not** unit-tested — it needs the hand-written host harness |
 | 2.6 | Wire 2.1–2.5 into `render()` with a **procedural placeholder matte** (a luminance-key or a fixed shape) so the full path is exercised end-to-end | 🟢 harness; 🔴 **you see a working, controllable matte effect in Resolve with real inspector response** |
 | 2.7 | Verify no colour shift and no black-background artifacts on: 8-bit, 10-bit, 16-bit, float timelines; Color page and Edit page | 🔴 you, using `tools/checklist-phase2.md` |
+
+> **Status — 🟢 parts done and tested, 🔴 parts untouched.** 2.1, 2.2, 2.3 and 2.4 are **done and
+> unit-tested**, including the two assertions that matter most: display-referred encoding is an exact
+> no-op, and composited RGB is bit-identical to source RGB in every mode. 2.5 and 2.6 are written and
+> compile, with the end-to-end path exercised by `test_pipeline` against the procedural
+> border-colour matte — so 2.6's 🟢 half is genuinely done. **2.7 is untouched**: no bit-depth or
+> page behaviour has been observed inside Resolve.
+>
+> Writing these tests found three real bugs, all fixed: `backgroundTransparency` defaulted to a
+> pass-through (doc 03 §D11), `sanitise()` clamped before replacing non-finite values, and
+> `computeFallbackKeyMatte()` silently no-opped on an empty destination.
 
 **Done when:** in Resolve you can switch all four output modes, move `backgroundTransparency`, and see
 correct results with **no colour shift and no unintended opaque black** on any bit depth. Still no AI.

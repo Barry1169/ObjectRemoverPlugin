@@ -35,11 +35,12 @@ install(TARGETS ${OFX_PLUGIN_NAME}
         LIBRARY DESTINATION "${AIBGR_BUNDLE_STAGING}/Contents/${AIBGR_ARCH_DIR}"
         RUNTIME DESTINATION "${AIBGR_BUNDLE_STAGING}/Contents/${AIBGR_ARCH_DIR}")
 
-# Ship the licence notices alongside the binary. OFX is BSD-3-Clause and ONNX Runtime is MIT;
-# whichever model weights the user installs carry their own terms (see docs/01 section 6.1).
+# Ship the licence notices alongside the binary. Not OPTIONAL: if this file ever goes missing the
+# install should fail loudly rather than silently ship a bundle with no attribution. The file itself
+# says which components are actually redistributed at each phase, including the NVIDIA CUDA/cuDNN
+# terms that are NOT open source.
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/packaging/THIRD_PARTY_LICENSES.txt"
-        DESTINATION "${AIBGR_BUNDLE_STAGING}/Contents/${AIBGR_ARCH_DIR}"
-        OPTIONAL)
+        DESTINATION "${AIBGR_BUNDLE_STAGING}/Contents/${AIBGR_ARCH_DIR}")
 
 # A post-build reminder, because the two rules that bite hardest are easy to forget:
 # exports must be undecorated, and Resolve must be closed before copying.
@@ -48,10 +49,16 @@ if(WIN32)
     COMMAND ${CMAKE_COMMAND} -E echo
       "Built $<TARGET_FILE:${OFX_PLUGIN_NAME}>"
     COMMAND ${CMAKE_COMMAND} -E echo
-      "  Verify exports:  dumpbin /exports $<TARGET_FILE_NAME:${OFX_PLUGIN_NAME}>"
+      "  Verify exports:    dumpbin /exports $<TARGET_FILE_NAME:${OFX_PLUGIN_NAME}>"
     COMMAND ${CMAKE_COMMAND} -E echo
-      "  Expect plain:    OfxGetNumberOfPlugins  OfxGetPlugin  OfxSetHost"
+      "  Expect EXACTLY:    OfxGetNumberOfPlugins  OfxGetPlugin"
     COMMAND ${CMAKE_COMMAND} -E echo
-      "  Close Resolve before copying into the OFX Plugins folder."
+      "  (plain names, no leading underscore, no @n; OfxSetHost is NOT exported - doc 03 D10)"
+    COMMAND ${CMAKE_COMMAND} -E echo
+      "  Verify runtime:    dumpbin /dependents $<TARGET_FILE_NAME:${OFX_PLUGIN_NAME}>"
+    COMMAND ${CMAKE_COMMAND} -E echo
+      "  Expect only:       KERNEL32.dll  (static CRT; anything else must ship in the bundle)"
+    COMMAND ${CMAKE_COMMAND} -E echo
+      "  Close Resolve completely before copying into the OFX Plugins folder - a loaded .ofx is file-locked."
     VERBATIM)
 endif()

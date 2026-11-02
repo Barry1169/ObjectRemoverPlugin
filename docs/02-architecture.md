@@ -37,23 +37,26 @@ ONNX Runtime present — which is what makes honest verification possible in thi
 ObjectRemoverPlugin/
 ├── CMakeLists.txt                     # top level: options, targets, install
 ├── cmake/
-│   ├── OpenFXSDK.cmake                # locate SDK via OPENFX_SDK_DIR; build OfxSupport static lib
+│   ├── OpenFXSDK.cmake                # locate the SDK's include/ dir; probe optional host features
+│   ├── PluginIdentity.h.in            # generated: unique ID, label, grouping, version
 │   ├── OnnxRuntime.cmake              # optional link-time headers ONLY (we load at runtime)
 │   └── BundleLayout.cmake             # assemble <Name>.ofx.bundle/Contents/Win64 + deps
 ├── plugin/                            # ── L1 ────────────────────────────────
-│   ├── OfxEntry.cpp                   #   OfxGetPluginIDs / OfxGetPlugin / OfxSetHost (dllexport)
+│   ├── OfxEntry.cpp                   #   OfxGetNumberOfPlugins / OfxGetPlugin (dllexport).
+│   │                                  #   OfxSetHost is deliberately NOT exported — see D10
 │   ├── BgRemoverPlugin.h/.cpp         #   describe(), describeInContext(), render(), isIdentity(),
 │   │                                  #   getRegionOfDefinition(), getClipPreferences(),
 │   │                                  #   beginContextRender/endContextRender, changedParam
-│   ├── BgRemoverParams.h/.cpp         #   param IDs, ranges, defaults, group/page construction,
-│   │                                  #   param → PipelineSettings mapping
+│   ├── ParamDefs.h/.cpp               #   param script names, ranges, defaults, group/page layout
+│   ├── ParamValues.h/.cpp             #   param → PipelineSettings mapping, button + log handling
+│   ├── PluginPaths.h/.cpp             #   %ProgramData% data dir, models dir, log path
 │   ├── OfxImageAdapter.h/.cpp         #   OFX::Image ⇄ core::ImageView (all 4 bit depths,
 │   │                                  #   rowBytes stride, bounds vs RoD, render window)
-│   ├── HostCompat.h/.cpp              #   host capability probing + Resolve-specific guards
+│   ├── HostBridge.h/.cpp              #   suite acquisition, Props wrapper, full host capability
+│   │                                  #   probe mirrored from the SDK's own fetchHostDescription
 │   └── OverlayInteract.cpp            #   (Phase 8, optional) click-to-pick-subject
 ├── core/                              # ── L0 ────────────────────────────────
-│   ├── Types.h                        #   PixelFormat, ComponentSet, Rect, Size, Time
-│   ├── ImageView.h                    #   non-owning strided view over any bit depth
+│   ├── Types.h/.cpp                   #   BitDepth, ComponentSet, RectI, RectD, Size
 │   ├── FloatImage.h/.cpp              #   RGBA float32 working buffer, grow-only reuse
 │   ├── PixelConvert.h/.cpp            #   Byte/UShort/Half/Float ⇄ float32 (own half impl)
 │   ├── Premultiply.h/.cpp             #   premult ⇄ straight, epsilon-safe unpremultiply
@@ -61,8 +64,10 @@ ObjectRemoverPlugin/
 │   │                                  #   INPUT ONLY — never touches composited output
 │   ├── FrameContext.h                 #   time, renderScale, RoD, bounds, PAR, field, draft,
 │   │                                  #   thumbnail, interactive, sequentialRenderStatus
-│   ├── PipelineSettings.h             #   plain struct mirroring every inspector control
-│   └── Pipeline.h/.cpp                #   the per-frame orchestrator (see §3)
+│   ├── PipelineSettings.h/.cpp        #   plain struct mirroring every inspector control, plus
+│   │                                  #   OutputMode / ProcessingMode / QualityPreset / ModelId
+│   └── Pipeline.h/.cpp                #   the per-frame orchestrator (see §3), and the MatteSource
+│                                      #   + AbortChecker seams that L2 and L1 plug into
 ├── inference/                         # ── L2 ────────────────────────────────
 │   ├── ort/
 │   │   ├── OrtLoader.h/.cpp           #   LoadLibraryW + OrtGetApiBase + GetApi, DML symbol probe
@@ -72,14 +77,17 @@ ObjectRemoverPlugin/
 │   │   └── OrtRunner.h/.cpp           #   Run() with preallocated I/O tensors, error → status
 │   ├── ModelSpec.h/.cpp               #   input HW, norm mean/std, output index, sigmoid?,
 │   │                                  #   op-variant tag (std vs native DeformConv), dtype
-│   ├── Segmenter.h                    #   interface: segment(const FloatImage&) -> Matte
+│   ├── Segmenter.h                    #   implements core::MatteSource (declared in core/Pipeline.h,
+│   │                                  #   NOT here — L0 must not depend on L2)
 │   ├── BiRefNetSegmenter.h/.cpp
 │   ├── SmallMatteSegmenter.h/.cpp     #   MODNet / PP-Matting class
 │   ├── ViTMatteRefiner.h/.cpp         #   optional stage 2 (Phase 7)
 │   └── Preprocess.h/.cpp              #   letterbox resize + normalize + NCHW pack
 ├── matte/                             # ── L3 ────────────────────────────────
-│   ├── Matte.h                        #   single-channel float32 + dims, grow-only reuse
+│   ├── Matte.h/.cpp                   #   single-channel float32 + dims, grow-only reuse
 │   ├── Resize.h/.cpp                  #   area-decimate down, bicubic/bilinear up
+│   ├── PlaceholderMatte.h/.cpp        #   border-colour fallback key: a working basic mode when
+│   │                                  #   no AI model is installed (requirement §9)
 │   ├── GuidedFilter.h/.cpp            #   detail transfer using full-res frame as guide  ★
 │   ├── Morphology.h/.cpp              #   erode/dilate = Edge Expansion; open/close
 │   ├── Feather.h/.cpp                 #   separable Gaussian + distance-based soft edge
@@ -88,8 +96,9 @@ ObjectRemoverPlugin/
 │   ├── Temporal.h/.cpp                #   motion-aware EMA + state validity rules  ★
 │   └── MatteRefiner.h/.cpp            #   facade applying the inspector controls in order
 ├── composite/                         # ── L4 ────────────────────────────────
-│   ├── OutputMode.h
-│   └── Compositor.h/.cpp              #   4 modes + background transparency + matte preview
+│   └── Compositor.h/.cpp              #   4 modes + background transparency + matte preview.
+│                                      #   OutputMode itself lives in core/PipelineSettings.h so
+│                                      #   that L0 can reason about it without depending on L4
 ├── models/                            # ── L5 ────────────────────────────────
 │   ├── ModelId.h                      #   enum + string mapping
 │   ├── ModelDiscovery.h/.cpp          #   search paths, manifest.json, SHA-256 verify
@@ -100,7 +109,8 @@ ObjectRemoverPlugin/
 │   ├── Log.h/.cpp                     #   OFX log when available, rotating file log otherwise
 │   ├── Status.h                       #   Result<T>/error codes — no exceptions across L1
 │   ├── Hash.h, ScopeTimer.h, FixedPool.h, Semaphore.h
-│   └── win/Paths.h/.cpp               #   bundle dir, %ProgramData%, DLL directory handling
+│   └── Paths.h/.cpp                   #   bundle dir, %ProgramData%, DLL directory handling,
+│                                      #   UTF-8 → wide conversion for the Win32 W APIs
 ├── tools/
 │   ├── probe-env.ps1                  #   V4: dumps your real toolchain versions
 │   ├── probe_model.py                 #   V12: prints a model's true tensor signature
@@ -113,8 +123,36 @@ ObjectRemoverPlugin/
 └── docs/
 ```
 
-Nothing here is a "one large C++ source file"; the largest single translation unit is expected to be
-`BgRemoverPlugin.cpp` at well under 800 lines.
+Nothing here is a "one large C++ source file". The largest translation unit after Phases 1–2 is
+`plugin/BgRemoverPlugin.cpp` at about 790 lines, of which roughly 300 are the action dispatcher that
+the support library would otherwise have generated for us (D10).
+
+### 1.1 As built after Phases 1–2
+
+What exists in the repository now, versus what is still planned:
+
+| Layer | Built | Still to come |
+|---|---|---|
+| `util/` | `Status.h`, `Log`, `Paths`, `Hash.h`, `ScopeTimer.h` | `FixedPool.h`, `Semaphore.h` |
+| `core/` | `Types`, `FloatImage`, `PixelConvert`, `Premultiply`, `ColorSpace`, `PipelineSettings`, `FrameContext.h`, `Pipeline` | — |
+| `matte/` | `Matte`, `Resize`, `PlaceholderMatte` | `GuidedFilter`, `Morphology`, `Feather`, `Smooth`, `Components`, `Temporal`, `MatteRefiner` (Phase 5–6) |
+| `composite/` | `Compositor` | — |
+| `plugin/` | `OfxEntry`, `HostBridge`, `ParamDefs`, `ParamValues`, `PluginPaths`, `OfxImageAdapter`, `BgRemoverPlugin` | `OverlayInteract` (Phase 8, optional) |
+| `inference/` | nothing | all of it (Phase 3–4) |
+| `models/` | nothing | all of it (Phase 3) |
+| `tools/` | nothing | all of it |
+| `tests/` | 116 checks over 8 suites, `tests/TestCase.h` harness | ORT and Resolve-level tests |
+
+Two deviations from the tree above are worth stating plainly, because both were found by writing code
+rather than by reading the plan:
+
+- **There is no `core/ImageView.h`.** The plan assumed a non-owning strided view over any bit depth.
+  In practice the OFX-side view is `plugin/OfxImageAdapter`'s `OfxImageInfo` (which owns no pixels and
+  knows the stride, depth and component layout), and the core side only ever needs `FloatImage`.
+  Adding a third abstraction between them bought nothing.
+- **`MatteSource` is declared in `core/Pipeline.h`, not in `inference/Segmenter.h`.** L0 must not
+  depend on L2. `inference/` implements the interface; it does not define it. That is what makes
+  Phase 4 a drop-in and what lets `tests/test_pipeline.cpp` substitute a stub segmenter.
 
 ---
 
@@ -371,8 +409,8 @@ transparency control:
 
 | Param | OFX type | Range / choices | Default | Description |
 |---|---|---|---|---|
-| `outputMode` | Choice | `Composite` / `Foreground Only` / `Background Only` / `Matte Only` | **`Composite`** | Composite = original subject over transparency (alpha written). Foreground Only = subject pre-multiplied, background zeroed. Background Only = the removed background, with the subject hole filled by `backgroundTransparency`. Matte Only = the alpha as a greyscale image. |
-| `backgroundTransparency` | Double | 0–1 | **0** | Background Transparency. In `Composite`/`Background Only`, how much of the original background remains visible behind/around the subject. 0 = fully removed. |
+| `outputMode` | Choice | `Composite` / `Foreground Only` / `Background Only` / `Matte Only` | **`Composite`** | **Composite** — source RGB untouched, `A = a + (1 − t)·(1 − a)`. **Foreground Only** — source RGB untouched, `A = a`. **Background Only** — source RGB untouched, `A = 1 − a`: a preview of exactly what was removed. **Matte Only** — the alpha as an opaque greyscale image, `A = 1`. In all four, RGB is either the source or the matte; it is never zeroed, which is what keeps a removed background from turning black. All output is written **un-premultiplied**; re-premultiplication happens once, in `plugin/OfxImageAdapter`, if the host asked for it. |
+| `backgroundTransparency` | Double | 0–1 | **1** | Background Transparency: how transparent the removed background becomes, so the alpha given to background pixels in `Composite` is `1 − t`. **1 (default) removes it completely; 0 leaves the frame untouched** and makes the effect an identity that `isIdentity()` reports to the host. Ignored by `Foreground Only`, `Background Only` and `Matte Only`. See doc 03 §D11 — the first implementation had this polarity inverted, which made a freshly installed plugin do nothing at all. |
 | `matteInvert` | Boolean | — | false | Show the inverse matte in `Matte Only`. |
 | `premultiplyOutput` | Choice | `Follow Host` / `Premultiplied` / `Straight` | `Follow Host` | Escape hatch for hosts/pages that disagree about premultiplication. Fixes dark halos without a rebuild. |
 

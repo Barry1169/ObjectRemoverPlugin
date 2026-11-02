@@ -102,16 +102,30 @@ CMakeLists.txt           top level; project VERSION 1.5.1
 - The top-level `CMakeLists.txt` only calls `find_package(opengl_system|cimg|spdlog REQUIRED)` when
   `BUILD_EXAMPLE_PLUGINS=ON`. `find_package(EXPAT)` is *not* `REQUIRED`. `HostSupport` links
   `expat::expat` publicly, so `add_subdirectory(openfx)` pulls in an expat requirement we don't want.
-  → **Recommended: do not `add_subdirectory()` the SDK. Point at it with `-DOPENFX_SDK_DIR=…` and
-  compile `Support/Library/*.cpp` into our own static target.** This also keeps your existing
-  `D:\DavinciCoding\OpenFX\openfx` checkout untouched (you asked that nothing be modified).
+  → **Recommended: do not `add_subdirectory()` the SDK. Point at it with `-DOPENFX_SDK_DIR=…`.**
+  This also keeps your existing `D:\DavinciCoding\OpenFX\openfx` checkout untouched (you asked that
+  nothing be modified).
+
+  > **Corrected.** This bullet originally went on to recommend compiling `Support/Library/*.cpp` into
+  > our own static target. That is withdrawn — see doc 03 §D10. `OPENFX_SDK_DIR` is now used for its
+  > `include/` directory and nothing else; **no SDK source file is compiled**, so the Support
+  > library's ~10k lines and `HostSupport`'s public expat dependency never enter the build.
 - `add_ofx_plugin()` confirms the Windows bundle layout the plugin must ship as:
   `<Name>.ofx.bundle/Contents/Win64/<Name>.ofx`.
 - `set_target_properties(... C_VISIBILITY_PRESET hidden CXX_VISIBILITY_PRESET hidden)` — symbols must
-  be exported explicitly. On MSVC that means `__declspec(dllexport)` on `OfxGetPluginIDs`,
-  `OfxGetPlugin` and `OfxSetHost`. The SDK provides `mDeclarePluginFactory`-style macros; we must
-  make sure the export macro is applied, or Resolve will not see the entry points. There is an SDK
-  branch named `fix/ofxexport-visibility` — a hint that this has bitten people.
+  be exported explicitly. On MSVC that means `__declspec(dllexport)` on **`OfxGetNumberOfPlugins` and
+  `OfxGetPlugin`** (`ofxCore.h:642,650`). The SDK's own `OfxExport` macro already expands to exactly
+  that on Windows and to `visibility("default")` elsewhere, so including `ofxCore.h` and matching its
+  declarations is sufficient — no hand-rolled export macro is needed.
+
+  > **Corrected twice here.** This bullet originally named `OfxGetPluginIDs`, which is not an OFX 1.x
+  > entry point at all, and listed `OfxSetHost` as a required export. `OfxSetHost` is *optional*
+  > (`ofxCore.h:661`, added 2020) and a host that finds it treats a `kOfxStatFailed` return as "skip
+  > this plugin silently"; the configuration proven to work in Resolve Free 21.1 does not export it.
+  > Both points are verified by building and inspecting the binary — see doc 05 §2.
+  > The SDK branch named `fix/ofxexport-visibility` was real, and the underlying hazard (a decorated
+  > name that Resolve cannot resolve) is real; it is now checked with `dumpbin /exports` as a build
+  > step rather than assumed away.
 
 ### 4.3 OFX API facts that directly shape the design
 
@@ -339,7 +353,7 @@ code.** The rest I can resolve myself during the phases noted.
 | V4 | Exact MSVC/Build Tools/CMake/SDK versions present | Affects `CMAKE_GENERATOR`, `/std:` flag, and whether `vcpkg`/Conan is available | Run the `tools/probe-env.ps1` script supplied in Phase 0 | Phase 1 |
 | V5 | What your `D:\DavinciCoding\OpenFX\openfx` checkout actually contains and which OFX version it is | If it is older than 1.5.1 we must not use 1.5-only properties | `git -C D:\DavinciCoding\OpenFX\openfx log -1` and check `include/ofxImageEffect.h` for `kOfxImageEffectPropThumbnailRender` | Phase 1 |
 | V6 | Free disk space (your paste was cut off before `Get-Volume` output) | CUDA route needs several GB | Re-run the `Get-Volume` command | Phase 4 |
-| V7 | Which OFX API version Resolve 21.1 implements, and which host properties it advertises | Determines whether we may use `ThumbnailRender` / `SequentialRenderStatus` / `RenderQualityDraft`, or must guard them | The plugin logs `kOfxPropAPIVersion` and the host property set on first load; Phase 1 includes a diagnostic dump | Phase 1 |
+| V7 | Which OFX API version Resolve 21.1 implements, and which host properties it advertises | Determines whether we may use `ThumbnailRender` / `SequentialRenderStatus` / `RenderQualityDraft`, or must guard them | **The instrument is built and waiting.** `HostBridge::acquireSuites()` reads the same host property list as the SDK's own `fetchHostDescription` (`Support/Library/ofxsImageEffect.cpp:1840-1924`) and writes it to `%ProgramData%\<Vendor>\AiBgRemover\log.txt` on `kOfxActionLoad`. Set **Diagnostics → Log Level = Verbose** and read the four `host:` lines. **Still needs one run inside Resolve to answer.** Note the code guards every one of these properties regardless, because `Props::getInt` takes a fallback: a host that omits a property degrades instead of failing. | Phase 1 |
 | V8 | Whether a prebuilt ORT with the **WinML** EP is publicly available | Could give DX12-backed GPU inference with no redistributable DLLs on Win11 | Check NuGet for a WinML-enabled package once V2 is decided | Phase 4 |
 | V9 | Repo name vs. function: *ObjectRemover* implies inpainting; the brief is background removal | Naming, bundle ID, installer | Your call | Phase 1 |
 | V10 | MODNet pretrained-weight license (Apache-2.0 vs CC BY-NC-SA 4.0) | Whether we may ship the weights | Read `ZHKKKe/MODNet` README + the checkpoint's own metadata | Phase 3 |
