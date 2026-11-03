@@ -4,10 +4,15 @@
 #include "plugin/BgRemoverPlugin.h"
 #include "plugin/HostBridge.h"
 #include "plugin/ParamDefs.h"
+#include "plugin/ParamValues.h"
+#include "plugin/PluginPaths.h"
 #include "util/Log.h"
 
 #include <atomic>
 #include <cstring>
+#include <cstdarg>
+#include <chrono>
+#include <filesystem>
 #include <thread>
 #include <map>
 #include <string>
@@ -47,6 +52,7 @@ struct FakeHost {
     int effectToken = 0, paramToken = 0, srcToken = 0, dstToken = 0;
     int paramWrites = 0, recursionDepth = 0;
     bool sourceAvailable = true;
+    double tolerance = 0.25, softness = 0.08;
     OfxImageEffectHandle effect() { return reinterpret_cast<OfxImageEffectHandle>(&effectToken); }
     OfxParamSetHandle paramSet() { return reinterpret_cast<OfxParamSetHandle>(&paramToken); }
     OfxImageClipHandle src() { return reinterpret_cast<OfxImageClipHandle>(&srcToken); }
@@ -62,7 +68,17 @@ const void* fetch(OfxPropertySetHandle, const char* name, int version) {
     if (std::strcmp(name, kOfxParameterSuite) == 0) return &current->params;
     return nullptr;
 }
-OfxStatus getParameterAtTime(OfxParamHandle, OfxTime, ...) { return kOfxStatErrUnknown; }
+OfxStatus getParameterAtTime(OfxParamHandle p, OfxTime time, ...) {
+    const char* name = reinterpret_cast<const char*>(p);
+    if (std::strcmp(name, pname::kFallbackKeyTolerance) != 0 &&
+        std::strcmp(name, pname::kFallbackKeySoftness) != 0) return kOfxStatErrUnknown;
+    va_list args;
+    va_start(args, time);
+    double* result = va_arg(args, double*);
+    *result = std::strcmp(name, pname::kFallbackKeyTolerance) == 0 ? current->tolerance : current->softness;
+    va_end(args);
+    return kOfxStatOK;
+}
 OfxStatus setParameterAtTime(OfxParamHandle p, OfxTime, ...) {
     ++current->paramWrites;
     if (++current->recursionDepth < 5) {
@@ -117,7 +133,8 @@ FakeHost::FakeHost() {
         if (std::strcmp(name, pname::kStatusText) && std::strcmp(name, pname::kLogPath) &&
             std::strcmp(name, pname::kDetailRefinement) && std::strcmp(name, pname::kEdgeFeather) &&
             std::strcmp(name, pname::kEdgeExpansion) && std::strcmp(name, pname::kEdgeSmoothing) &&
-            std::strcmp(name, pname::kShiftMatte)) return kOfxStatErrUnknown;
+            std::strcmp(name, pname::kShiftMatte) && std::strcmp(name, pname::kFallbackKeyTolerance) &&
+            std::strcmp(name, pname::kFallbackKeySoftness)) return kOfxStatErrUnknown;
         *out = reinterpret_cast<OfxParamHandle>(const_cast<char*>(name)); return kOfxStatOK;
     };
     params.paramGetValueAtTime = getParameterAtTime;
@@ -208,4 +225,52 @@ TEST(ofxStability, concurrentRenderAndPurgeProtectScratch) {
     CHECK_EQ(failures.load(), 0);
     CHECK_EQ(host.paramWrites, 0);
     CHECK_EQ(pluginMain(kOfxActionDestroyInstance, host.effect(), nullptr, nullptr), kOfxStatOK);
+}
+
+TEST(ofxStability, colourKeySettingsAreReadAndChangeTheRenderedMatte) {
+    FakeHost host;
+    // Green border, orange centre: a predictable simple key.
+    for (int y = 0; y < 64; ++y) for (int x = 0; x < 64; ++x) {
+        float* p = &host.source[(y * 64 + x) * 4];
+        p[0] = (x >= 16 && x < 48 && y >= 16 && y < 48) ? 0.6f : 0.1f;
+        p[1] = 0.5f; p[2] = 0.1f; p[3] = 1.0f;
+    }
+    host.tolerance = 0.05; host.softness = 0.02;
+    aibgr::PipelineSettings settings;
+    std::string note;
+    CHECK(readSettings(host.paramSet(), 0.0, settings, note).ok());
+    CHECK_NEAR(settings.fallbackKeyTolerance, 0.05, 1e-6);
+    CHECK_NEAR(settings.fallbackKeySoftness, 0.02, 1e-6);
+    CHECK_EQ(pluginMain(kOfxActionCreateInstance, host.effect(), nullptr, nullptr), kOfxStatOK);
+    CHECK_EQ(pluginMain(kOfxImageEffectActionRender, host.effect(), handle(host.args), nullptr), kOfxStatOK);
+    const float lowToleranceAlpha = host.output[(32 * 64 + 32) * 4 + 3];
+    host.tolerance = 0.9;
+    CHECK_EQ(pluginMain(kOfxImageEffectActionRender, host.effect(), handle(host.args), nullptr), kOfxStatOK);
+    const float highToleranceAlpha = host.output[(32 * 64 + 32) * 4 + 3];
+    CHECK(lowToleranceAlpha > highToleranceAlpha + 0.2f);
+    host.tolerance = 0.3; host.softness = 0.02;
+    CHECK_EQ(pluginMain(kOfxImageEffectActionRender, host.effect(), handle(host.args), nullptr), kOfxStatOK);
+    const float narrowAlpha = host.output[(32 * 64 + 32) * 4 + 3];
+    host.softness = 0.3;
+    CHECK_EQ(pluginMain(kOfxImageEffectActionRender, host.effect(), handle(host.args), nullptr), kOfxStatOK);
+    const float wideAlpha = host.output[(32 * 64 + 32) * 4 + 3];
+    CHECK_MSG(std::fabs(narrowAlpha - wideAlpha) > 0.01f, std::to_string(narrowAlpha) + " vs " + std::to_string(wideAlpha));
+    CHECK_EQ(pluginMain(kOfxActionDestroyInstance, host.effect(), nullptr, nullptr), kOfxStatOK);
+}
+
+TEST(ofxStability, choosesWritableLogAndFallsBackWithoutTruncating) {
+    namespace fs = std::filesystem;
+    const fs::path dir = fs::temp_directory_path() / ("aibgr-log-test-" +
+        std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    fs::create_directories(dir);
+    const std::string preferred = (dir / "preferred.log").string();
+    const std::string fallback = (dir / "fallback.log").string();
+    CHECK_EQ(selectWritableLogPath(preferred, fallback), preferred);
+    CHECK(fs::exists(preferred));
+    CHECK(!fs::exists(fallback));
+    const std::string unavailable = (dir / "missing" / "log.txt").string();
+    CHECK_EQ(selectWritableLogPath(unavailable, fallback), fallback);
+    CHECK(fs::exists(fallback));
+    CHECK(selectWritableLogPath(unavailable, (dir / "missing2" / "log.txt").string()).empty());
+    fs::remove_all(dir);
 }

@@ -207,3 +207,14 @@ TEST(placeholderMatte, transparentFrameDoesNotProduceNan) {
         }
     }
 }
+
+TEST(placeholderMatte, softnessWiderThanToleranceKeepsExactBackgroundTransparent) {
+    FloatImage image = makeSubjectFrame(16, 16, 4, 4, 12, 12);
+    FallbackKeySettings settings;
+    settings.tolerance = 0.1f;
+    settings.softness = 0.5f;
+    Matte matte;
+    computeFallbackKeyMatte(image, matte, settings);
+    CHECK_NEAR(matte.at(2, 2), 0.0f, 1e-6);
+    CHECK(matte.at(8, 8) > 0.0f);
+}

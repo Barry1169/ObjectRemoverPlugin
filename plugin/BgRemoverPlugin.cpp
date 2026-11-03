@@ -628,8 +628,7 @@ OfxStatus pluginMain(const char* action, const void* handle, OfxPropertySetHandl
             // Open the log FIRST. acquireSuites() is what writes the host capability dump that
             // answers V7, and if the file is not open yet those lines go nowhere - which would make
             // the single most useful diagnostic of the first Resolve run invisible.
-            if (ensurePluginDataDir()) {
-                Log::instance().setFilePath(defaultLogPath());
+            if (!configurePluginLog().empty()) {
                 AIBGR_LOGI("=== %s v%s loaded into a new host ===", AIBGR_PLUGIN_LABEL,
                            AIBGR_PLUGIN_VERSION_STRING);
             } else {

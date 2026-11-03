@@ -83,7 +83,8 @@ void computeFallbackKeyMatte(const FloatImage& image, Matte& out,
     // The key is on SQUARED distance (see colourDistanceSquared), so the tolerance band is
     // squared too. Comparing an unsquared tolerance against a squared distance would
     // shrink the effective key range for every tolerance below 1.0.
-    const float edge0 = std::max(0.0f, (tolerance - softness) * (tolerance - softness));
+    const float lower = std::max(0.0f, tolerance - softness);
+    const float edge0 = lower * lower;
     const float edge1 = (tolerance + softness) * (tolerance + softness);
 
     for (int y = 0; y < image.height(); ++y) {

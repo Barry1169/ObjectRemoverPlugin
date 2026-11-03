@@ -294,7 +294,7 @@ Result defineParameters(OfxParamSetHandle paramSet, const std::vector<ModelChoic
                  "Auto picks between Display Referred and Scene Linear from mean luminance.",
                  pname::kGroupRemoval, colorSpaceOptions(), 0);
 
-    defineInt(d, pname::kDespeckle, "Despeckle",
+    defineInt(d, pname::kDespeckle, "Despeckle (not implemented yet)",
               "Discards matte islands smaller than this many pixels before refinement. Removes "
               "the speckle a segmentation network sometimes leaves in a busy background.",
               pname::kGroupRemoval, 8, 0, 1000);
@@ -345,26 +345,36 @@ Result defineParameters(OfxParamSetHandle paramSet, const std::vector<ModelChoic
                      pname::kGroupRemoval, modelLabels, 0);
     }
 
+    // The current algorithm is a simple border-colour key, not AI segmentation. Keep its
+    // controls prominent rather than hiding the only useful adjustments under Diagnostics.
+    defineDouble(d, pname::kFallbackKeyTolerance, "Background Colour Tolerance",
+                 "Controls how close a pixel must be to the estimated border colour to be removed. "
+                 "Higher removes more similar colours; lower preserves more.",
+                 pname::kGroupRemoval, 0.25, 0.0, 1.0, 0.0, 1.0);
+    defineDouble(d, pname::kFallbackKeySoftness, "Background Colour Softness",
+                 "Softens the colour-key transition. This is not AI edge refinement.",
+                 pname::kGroupRemoval, 0.08, 0.0, 1.0, 0.0, 1.0);
+
     // --- Tab 2: Matte Refinement ------------------------------------------
     defineGroup(d, pname::kGroupRefine, "Matte Refinement", /*open*/ true);
 
-    defineDouble(d, pname::kDetailRefinement, "Refine Edges",
+    defineDouble(d, pname::kDetailRefinement, "Refine Edges (not implemented yet)",
                  "Transfers fine detail (hair, fur, foliage) from the full-resolution frame back "
                  "into the matte using a guided filter. This is what stops a matte computed at 512 "
                  "from looking soft at 4K. 0 = plain bicubic upscale.",
                  pname::kGroupRefine, 60.0, 0.0, 100.0, 0.0, 100.0);
 
-    defineDouble(d, pname::kEdgeFeather, "Edge Feather",
+    defineDouble(d, pname::kEdgeFeather, "Edge Feather (not implemented yet)",
                  "Softness of the matte transition, in source pixels.", pname::kGroupRefine, 1.0,
                  0.0, 100.0, 0.0, 20.0);
 
-    defineDouble(d, pname::kEdgeExpansion, "Edge Expansion",
+    defineDouble(d, pname::kEdgeExpansion, "Edge Expansion (not implemented yet)",
                  "Grows or shrinks the foreground selection, in source pixels. Negative chokes "
                  "the matte inwards to kill a fringe; positive grows it outwards to recover an "
                  "edge the model clipped.",
                  pname::kGroupRefine, 0.0, -100.0, 100.0, -20.0, 20.0);
 
-    defineDouble(d, pname::kEdgeSmoothing, "Foreground Smoothing",
+    defineDouble(d, pname::kEdgeSmoothing, "Foreground Smoothing (not implemented yet)",
                  "Edge-aware smoothing of the matte boundary. Reduces jaggies and rough edges "
                  "without eroding hair the way a plain blur would.",
                  pname::kGroupRefine, 20.0, 0.0, 100.0, 0.0, 100.0);
@@ -488,14 +498,8 @@ Result defineParameters(OfxParamSetHandle paramSet, const std::vector<ModelChoic
                          pname::kGroupDiag, "No AI backend; built-in colour key only");
 
     defineReadOnlyString(d, pname::kLogPath, "Log File",
-                         "Where the diagnostic log is written. Empty means file logging is off.",
+                         "Log path selected on plugin load. If unavailable, see the ProgramData or local cache log.",
                          pname::kGroupDiag, defaultLogPath());
-
-    defineDouble(d, pname::kFallbackKeyTolerance, "Fallback Key Tolerance",
-                 "Used only when no AI model is available: the built-in border-colour key's "
-                 "tolerance. Raise it if too much background survives, lower it if the subject is "
-                 "being eaten.",
-                 pname::kGroupDiag, 0.25, 0.0, 1.0, 0.0, 1.0);
 
     defineBool(d, pname::kFailLoudly, "Fail Loudly If Model Missing",
                "Development aid. Off (the default) means a missing model or runtime degrades to "

@@ -12,6 +12,21 @@ points. **No AI inference exists yet** — the plugin currently offers only its 
 key. The user-provided log shows successful fallback-key renders as well as a rapid repeated
 instance-change sequence; it does not establish the crash cause.
 
+## Current controls and log location
+
+The current matte is a simple key based on the border colour, not AI segmentation. In Background
+Removal, **Background Colour Tolerance** and **Background Colour Softness** adjust that key. Matte
+Bias and the output controls also work. Despeckle, Refine Edges, Edge Feather, Edge Expansion and
+Foreground Smoothing remain unimplemented; their labels say so. Larger-subject selection, GPU,
+temporal controls and model selection remain planned, not functional AI features.
+
+The preferred log is `AiBgRemover.ofx.bundle/Contents/Win64/log.txt`, alongside the `.ofx`. The
+installer grants the local Windows Users group write access to that **file only**, not to the plugin
+folder or executable. If it is unavailable, the plugin tries `%ProgramData%\AiBgRemover\log.txt`,
+then `%LOCALAPPDATA%\AiBgRemover\log.txt`. The log-path label is selected at load and may be stale
+in old saved projects. The installer backs up a previous bundle log before replacing or removing the
+bundle. These Windows paths and permissions still need verification on a Windows machine.
+
 ## Stability update
 
 The current build no longer writes diagnostic parameters from render or on every setting change;

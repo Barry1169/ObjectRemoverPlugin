@@ -292,6 +292,7 @@ Result readSettings(OfxParamSetHandle paramSet, double time, PipelineSettings& o
     wantDouble(pname::kMotionSensitivity, out.motionSensitivity);
 
     wantDouble(pname::kFallbackKeyTolerance, out.fallbackKeyTolerance);
+    wantDouble(pname::kFallbackKeySoftness, out.fallbackKeySoftness);
 
     out.sanitise();
 
@@ -354,12 +355,7 @@ void applyLogSettings(const ParamReader& params, double time) noexcept {
     log.setLevel(static_cast<LogLevel>(std::min(3, std::max(0, level))));
 
     if (log.filePath().empty()) {
-        if (ensurePluginDataDir()) {
-            const std::string path = defaultLogPath();
-            if (!path.empty()) {
-                log.setFilePath(path);
-            }
-        }
+        configurePluginLog();
     }
 }
 

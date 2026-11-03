@@ -59,6 +59,7 @@ constexpr const char* kLogLevel = "logLevel";
 constexpr const char* kLogPath = "logPath";
 constexpr const char* kFailLoudly = "failLoudly";
 constexpr const char* kFallbackKeyTolerance = "fallbackKeyTolerance";
+constexpr const char* kFallbackKeySoftness = "fallbackKeySoftness";
 
 // Groups and page
 constexpr const char* kGroupRemoval = "grpRemoval";

@@ -222,6 +222,10 @@ if not exist "%OFX_PLUGINS_DIR%" (
     )
 )
 
+set "PLUGIN_DATA=%ProgramData%\AiBgRemover"
+call :backup_bundle_log
+if errorlevel 1 exit /b 1
+
 echo   removing any previous install
 if exist "%OFX_PLUGINS_DIR%\%BUNDLE_NAME%" rmdir /s /q "%OFX_PLUGINS_DIR%\%BUNDLE_NAME%"
 
@@ -242,21 +246,24 @@ if exist "%RESOLVE_SUPPORT%\OFXPluginCacheV2.xml" (
     ren "%RESOLVE_SUPPORT%\OFXPluginCacheV2.xml" "OFXPluginCacheV2.xml.old" 2>nul
 )
 
-REM Make sure the log directory exists and is writable, so the first run has somewhere to write.
-set "PLUGIN_DATA=%ProgramData%\AiBgRemover"
-if not exist "%PLUGIN_DATA%" mkdir "%PLUGIN_DATA%" 2>nul
-if exist "%PLUGIN_DATA%\log.txt" del /q "%PLUGIN_DATA%\log.txt" 2>nul
+REM Allow ordinary Windows users to write ONLY the log file, not the plugin binary or folder.
+REM If creation/ACL setup fails, the plugin automatically falls back to ProgramData or LocalAppData.
+set "INSTALLED_LOG=%OFX_PLUGINS_DIR%\%BUNDLE_NAME%\Contents\Win64\log.txt"
+if not exist "%INSTALLED_LOG%" type nul > "%INSTALLED_LOG%"
+icacls "%INSTALLED_LOG%" /grant "*S-1-5-32-545:(W)" >nul 2>&1
+if errorlevel 1 echo WARNING: Could not grant write access to the plugin log; a fallback may be used.
 
 echo.
 echo ==================================================================
 echo  INSTALLED:  %OFX_PLUGINS_DIR%\%BUNDLE_NAME%
-echo  LOG FILE:   %PLUGIN_DATA%\log.txt   ^(cleared, ready for a fresh run^)
+echo  LOG FILE:   %INSTALLED_LOG%
+echo  FALLBACK:   %PLUGIN_DATA%\log.txt or %%LOCALAPPDATA%%\AiBgRemover\log.txt
 echo.
 echo  Now start DaVinci Resolve and:
 echo    1. Effects -^> OpenFX -^> AI Matting -^> AI Background Remover
 echo    2. Drag it onto a clip on the Edit page
 echo    3. Check all six tabs appear in the Inspector
-echo    4. Read %PLUGIN_DATA%\log.txt and look for the "host:" lines
+echo    4. Read the log file above and look for the "host:" lines
 echo.
 echo  If it does not appear in the Effects list, see
 echo  docs\05-build-install-test-windows.md section 3.
@@ -271,6 +278,9 @@ if not errorlevel 1 (
     echo ERROR: close DaVinci Resolve first.
     exit /b 1
 )
+set "PLUGIN_DATA=%ProgramData%\AiBgRemover"
+call :backup_bundle_log
+if errorlevel 1 exit /b 1
 if exist "%OFX_PLUGINS_DIR%\%BUNDLE_NAME%" (
     rmdir /s /q "%OFX_PLUGINS_DIR%\%BUNDLE_NAME%"
     if errorlevel 1 (
@@ -286,5 +296,24 @@ if exist "%RESOLVE_SUPPORT%\OFXPluginCacheV2.xml" (
     ren "%RESOLVE_SUPPORT%\OFXPluginCacheV2.xml" "OFXPluginCacheV2.xml.old" 2>nul
     echo   reset Resolve's OFX plugin cache
 )
-echo Done. The log at %ProgramData%\AiBgRemover\log.txt was left in place.
+echo Done. Any existing bundle log was backed up in %PLUGIN_DATA%.
+exit /b 0
+
+:backup_bundle_log
+set "OLD_LOG=%OFX_PLUGINS_DIR%\%BUNDLE_NAME%\Contents\Win64\log.txt"
+if not exist "%OLD_LOG%" exit /b 0
+if not exist "%PLUGIN_DATA%" mkdir "%PLUGIN_DATA%" 2>nul
+if not exist "%PLUGIN_DATA%" (
+    echo ERROR: Cannot create %PLUGIN_DATA% to back up the current log. Install stopped.
+    exit /b 1
+)
+:choose_log_backup
+set "LOG_BACKUP=%PLUGIN_DATA%\previous-log-%RANDOM%-%RANDOM%.txt"
+if exist "%LOG_BACKUP%" goto :choose_log_backup
+copy /y "%OLD_LOG%" "%LOG_BACKUP%" >nul
+if errorlevel 1 (
+    echo ERROR: Could not back up the current plugin log. Install stopped.
+    exit /b 1
+)
+echo   backed up plugin log to %LOG_BACKUP%
 exit /b 0

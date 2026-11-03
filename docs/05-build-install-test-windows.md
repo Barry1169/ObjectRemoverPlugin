@@ -16,17 +16,30 @@ instance-safe rendering, and protects reusable buffers from simultaneous renderi
 The Diagnostics Status and Log File labels are now static defaults; consult the log for details.
 Existing saved projects may retain an older label value.
 
-1. Back up the project and `%ProgramData%\AiBgRemover\log.txt`. Close Resolve completely.
+1. Back up the project and logs. Close Resolve completely.
 2. Get the current session's changes onto the Windows machine. From an x64 Native Tools Command
    Prompt, run `tools\build-install.bat build`. It builds, runs both core and fake-host tests,
    checks exports, and stages the bundle without installing it.
 3. Back up the old `AiBgRemover.ofx.bundle`. Run `tools\build-install.bat` as administrator to
-   install the new bundle. The script removes the previous installed bundle and clears the plugin
-   log, so make those backups first.
+   install the new bundle. The script backs up an existing bundle log under ProgramData before
+   replacing the previous bundle. Back up your project and bundle too.
 4. In a **new disposable Resolve project**, apply the effect, change settings, then try playback and
    scrubbing. If Resolve crashes, stop testing and share the new plugin log and Resolve crash report.
    This patch has not yet been validated with MSVC or Resolve; success in the fake host is not proof
    that the crash is fixed. The plugin still uses a basic color key, not AI segmentation.
+
+## Log location
+
+The preferred log is next to the installed `.ofx`:
+`C:\Program Files\Common Files\OFX\Plugins\AiBgRemover.ofx.bundle\Contents\Win64\log.txt`.
+The administrator-run installer creates this file and grants the Windows Users group write access
+only to the log file. It does not grant write access to the plugin binary or folder. If opening the
+file for appending fails, the plugin tries `%ProgramData%\AiBgRemover\log.txt`, then
+`%LOCALAPPDATA%\AiBgRemover\log.txt`; if all fail, it continues without a log. The actual choice
+is reflected in the static log-path parameter on load, but an old project may retain a stale value.
+Before reinstall or uninstall, the script saves the bundle log to a uniquely named
+`previous-log-*.txt` in `%ProgramData%\AiBgRemover`; it stops if that backup fails. Existing
+ProgramData logs are not deleted. These Windows-specific steps need real Windows validation.
 
 ## 1. Prerequisites
 
@@ -220,7 +233,7 @@ Rename-Item "$sup\OFXPluginCacheV2.xml" "OFXPluginCacheV2.xml.old" -ErrorAction 
 Then check, in order: (a) is it the `.ofx.bundle` *folder* in the right place, (b) does `dumpbin`
 show the two undecorated exports and only `KERNEL32.dll` as a dependent (§2), (c) is the plugin
 enabled in Video Plugins, (d) does
-`%ProgramData%\AiBgRemover\log.txt` show a load attempt. Also note that `OFX_PLUGIN_PATH`,
+the selected `log.txt` show a load attempt (see the log-location note below). Also note that `OFX_PLUGIN_PATH`,
 if set on your system, is searched *before* the default folder — check it is not shadowing anything.
 
 **If Resolve hangs at "Loading Video Plugins":** rename the `Plugins` folder to `Plugins.orig`,
