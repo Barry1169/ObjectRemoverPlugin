@@ -314,6 +314,10 @@ Result defineParameters(OfxParamSetHandle paramSet, const std::vector<ModelChoic
         modelValues.push_back(m.value.c_str());
     }
 
+    // kOfxParamTypeStrChoice is OFX 1.5. On an older SDK HostBridge has already forced
+    // caps.supportsStrChoice to false, and the #if keeps the branch out of the compile so the
+    // index-Choice path below is all that is built.
+#if defined(kOfxParamTypeStrChoice)
     if (caps.supportsStrChoice) {
         setModelUsesStrChoice(true);
         const Props h = d.define(kOfxParamTypeStrChoice, pname::kModel);
@@ -326,10 +330,13 @@ Result defineParameters(OfxParamSetHandle paramSet, const std::vector<ModelChoic
             p.setStringN(kOfxParamPropChoiceOption, modelLabels);
             p.setString(kOfxParamPropDefault, 0, kFallbackValue);
         }
-    } else {
+    } else
+#endif
+    {
         setModelUsesStrChoice(false);
-        AIBGR_LOGI("host does not support StrChoice; Model Selection uses an index Choice. "
-                   "Adding or removing a model file may re-point saved projects.");
+        AIBGR_LOGI("StrChoice unavailable (host does not advertise it, or this OpenFX SDK "
+                   "predates OFX 1.5); Model Selection uses an index Choice. Adding or removing "
+                   "a model file may re-point saved projects.");
         defineChoice(d, pname::kModel, "Model Selection",
                      "Which segmentation model to run. The list is built from the models actually "
                      "present on disk. NOTE: this host stores choices by index, so adding or "

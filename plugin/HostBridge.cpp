@@ -26,8 +26,14 @@ const char* ofxStatusName(OfxStatus status) noexcept {
     case kOfxStatReplyYes: return "ReplyYes";
     case kOfxStatReplyNo: return "ReplyNo";
     case kOfxStatReplyDefault: return "ReplyDefault";
+#if defined(kOfxStatUnlicensed)
+    // Added after OFX 1.4; not every SDK checkout has it. The switch is diagnostic only, so a
+    // missing code simply falls through to "Unknown" on an older SDK.
     case kOfxStatUnlicensed: return "Unlicensed";
+#endif
+#if defined(kOfxStatErrImageFormat)
     case kOfxStatErrImageFormat: return "ErrImageFormat";
+#endif
     default: break;
     }
     return "Unknown";
@@ -293,9 +299,18 @@ Result HostBridge::acquireSuites() {
         host.getInt(kOfxImageEffectPropSupportsMultipleClipPARs, 0, 0) != 0;
 
     caps_.sequentialRender = host.getInt(kOfxImageEffectInstancePropSequentialRender, 0, 0);
+#if defined(kOfxParamHostPropSupportsStrChoice)
     caps_.supportsStrChoice = host.getInt(kOfxParamHostPropSupportsStrChoice, 0, 0) != 0;
     caps_.supportsStrChoiceAnimation =
         host.getInt(kOfxParamHostPropSupportsStrChoiceAnimation, 0, 0) != 0;
+#else
+    // This SDK predates StrChoice (OFX 1.5). Forcing the flag false makes ParamDefs take the
+    // index-Choice path, which every host understands.
+    caps_.supportsStrChoice = false;
+    caps_.supportsStrChoiceAnimation = false;
+    AIBGR_LOGI("host: this OpenFX SDK has no kOfxParamTypeStrChoice (pre-1.5); Model Selection "
+               "will use an index Choice");
+#endif
     caps_.supportsChoiceAnimation = host.getInt(kOfxParamHostPropSupportsChoiceAnimation, 0, 0) != 0;
     caps_.supportsBooleanAnimation = host.getInt(kOfxParamHostPropSupportsBooleanAnimation, 0, 0) != 0;
     caps_.supportsRenderQualityDraft =

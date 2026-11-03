@@ -351,10 +351,14 @@ Result readFrameContext(OfxPropertySetHandle inArgs, OfxPropertySetHandle effect
         out.interactiveRender = (a.getInt(kOfxImageEffectPropInteractiveRenderStatus, 0, 0) != 0);
         out.draftQuality = (a.getInt(kOfxImageEffectPropRenderQualityDraft, 0, 0) != 0);
 
-        // ThumbnailRender is optional: only present on hosts that implement it.
+#if defined(kOfxImageEffectPropThumbnailRender)
+        // ThumbnailRender is doubly optional: the host may not implement it, and the property is
+        // OFX 1.5 so an older SDK does not even name it. When the symbol is absent a render is
+        // never a thumbnail render and out.thumbnailRender keeps its default of false.
         if (a.dimension(kOfxImageEffectPropThumbnailRender) > 0) {
             out.thumbnailRender = (a.getInt(kOfxImageEffectPropThumbnailRender, 0, 0) != 0);
         }
+#endif
 
         out.fieldToRender = parseField(a.getString(kOfxImageEffectPropFieldToRender, 0));
     }

@@ -85,9 +85,34 @@ if(_aibgr_probe)
   set(_aibgr_have_strchoice 1)
 endif()
 
+# kOfxStatUnlicensed arrived after OFX 1.4 and only affects a diagnostic switch.
+set(_aibgr_have_stat_unlicensed 0)
+file(STRINGS "${OPENFX_INCLUDE_DIR}/ofxCore.h" _aibgr_probe REGEX "kOfxStatUnlicensed")
+if(_aibgr_probe)
+  set(_aibgr_have_stat_unlicensed 1)
+endif()
+
+# ofxCore.h only marks the entry points __declspec(dllexport) when a platform macro it recognises
+# is set, and which macro that is changed with the SDK's age: older checkouts test WIN32/WIN64
+# (which MSVC does not define; CMake injects /DWIN32 for it), newer ones test _WIN32. This project
+# no longer depends on the spelling - plugin/OfxEntry.cpp exports through its own macro - but it is
+# worth reporting, because it explains an empty export table in any other plugin built against the
+# same checkout.
+set(_aibgr_ofxexport_guard "unknown")
+file(STRINGS "${OPENFX_INCLUDE_DIR}/ofxCore.h" _aibgr_probe REGEX "#if[ \\t]+defined\\((_|)WIN32\\)")
+foreach(_line IN LISTS _aibgr_probe)
+  if(_line MATCHES "defined\\(_WIN32\\)")
+    set(_aibgr_ofxexport_guard "_WIN32 (current)")
+  elseif(_line MATCHES "defined\\(WIN32\\)")
+    set(_aibgr_ofxexport_guard "WIN32 (pre-2025 SDK; needs /DWIN32 from the build system)")
+  endif()
+endforeach()
+
 message(STATUS "OpenFX SDK features: ThumbnailRender=${_aibgr_have_thumbnail_render} "
                "SequentialRender=${_aibgr_have_sequential_render} "
-               "StrChoice=${_aibgr_have_strchoice}")
+               "StrChoice=${_aibgr_have_strchoice} "
+               "StatUnlicensed=${_aibgr_have_stat_unlicensed}")
+message(STATUS "OpenFX SDK OfxExport guard: ${_aibgr_ofxexport_guard}")
 
 # Exported for the plugin target.
 set(OPENFX_FEATURE_THUMBNAIL_RENDER ${_aibgr_have_thumbnail_render} CACHE INTERNAL "")

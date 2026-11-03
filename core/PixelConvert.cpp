@@ -70,7 +70,11 @@ float halfToFloat(uint16_t h) noexcept {
 
 uint16_t floatToHalf(float f) noexcept {
     const uint32_t bits = floatToBits(f);
-    const uint32_t sign = static_cast<uint16_t>((bits >> 16) & 0x8000u);
+    // Already in half-bit position (float bit 31 -> half bit 15), so it is 0 or 0x8000 and always
+    // fits the return type. Declaring it uint16_t keeps MSVC /W4 quiet about the bare `return
+    // sign;` paths below without changing any value: C4244 was reporting the static type, not a
+    // real truncation.
+    const uint16_t sign = static_cast<uint16_t>((bits >> 16) & 0x8000u);
     const uint32_t biasedExponent = (bits >> 23) & 0xFFu;
     uint32_t mantissa = bits & 0x7FFFFFu;
 

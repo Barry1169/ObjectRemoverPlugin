@@ -148,20 +148,41 @@ if not exist "%STAGED_OFX%" (
 )
 
 echo.
-echo --- dumpbin /exports ---
-dumpbin /exports "%STAGED_OFX%" | findstr /i "OfxGet"
+set "EXPORTS_TXT=%TEMP%\aibgr_exports.txt"
+dumpbin /exports "%STAGED_OFX%" > "%EXPORTS_TXT%" 2>&1
+type "%EXPORTS_TXT%" | findstr /i "OfxGet"
+echo.
+
+REM An empty or decorated export table is the classic "Resolve loads the binary and reports
+REM no plugins" failure, so it is a hard stop rather than something to eyeball. The names must
+REM end the line: a leading underscore or an @n suffix means C++ mangling leaked through.
+set "EXPORT_FAIL="
+findstr /r /c:"OfxGetNumberOfPlugins *$" "%EXPORTS_TXT%" >nul || set "EXPORT_FAIL=OfxGetNumberOfPlugins"
+findstr /r /c:"OfxGetPlugin *$"          "%EXPORTS_TXT%" >nul || set "EXPORT_FAIL=%EXPORT_FAIL% OfxGetPlugin"
+if defined EXPORT_FAIL (
+    echo.
+    echo *** EXPORT CHECK FAILED: missing or decorated:%EXPORT_FAIL%
+    echo     Resolve will load this binary and report that it contains no plugins.
+    echo     plugin/OfxEntry.cpp exports both entry points through its own macro, so a
+    echo     failure here means something stripped the export table - check that
+    echo     /WHOLEARCHIVE or a .def file is not interfering, and paste the dumpbin
+    echo     output above when reporting it.
+    del "%EXPORTS_TXT%" 2>nul
+    exit /b 1
+)
+echo Export check PASSED: both entry points are present and undecorated.
+del "%EXPORTS_TXT%" 2>nul
+
 echo.
 echo --- dumpbin /dependents ---
 dumpbin /dependents "%STAGED_OFX%" | findstr /i ".dll"
 
 echo.
-echo CHECK THE TWO BLOCKS ABOVE BY EYE:
-echo   exports    must show exactly  OfxGetNumberOfPlugins  and  OfxGetPlugin
-echo              with NO leading underscore and NO @n suffix
-echo   dependents should list KERNEL32.dll and nothing else ^(static CRT^)
-echo              If you see VCRUNTIME140.dll or MSVCP140.dll, the static-CRT
-echo              setting did not apply and the plugin will fail to load on
-echo              machines without that redistributable.
+echo The dependents list above should contain KERNEL32.dll and nothing else while the
+echo CRT is linked statically. VCRUNTIME140.dll or MSVCP140.dll means -DOFX_STATIC_CRT=ON
+echo did not apply and the plugin will fail to load on a machine without that
+echo redistributable. Once ONNX Runtime is added in Phase 3 its DLLs appear here too and
+echo must be copied into the bundle alongside the .ofx.
 echo.
 
 if /I "%~1"=="build" (

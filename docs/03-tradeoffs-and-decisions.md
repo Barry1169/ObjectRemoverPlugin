@@ -299,3 +299,66 @@ A non-finite value from a broken keyframe falls back to **1.0**, not 0.0 — a N
 plugin's job rather than silently disable it. `PipelineSettings::sanitise()` replaces non-finite values
 *before* clamping, because `std::min`/`std::max` fold a NaN into whichever bound they compare against
 and the fallback would otherwise never run.
+
+---
+
+## D12 — Tolerate any OpenFX SDK vintage; never depend on `OfxExport`
+
+**Decision.** The plugin builds against whatever `include/` directory `OPENFX_SDK_DIR` points at,
+with no minimum version. Four optional symbols are guarded with `#ifdef`, and the two exported entry
+points are declared through a project-local macro rather than the SDK's `OfxExport`.
+
+**Why this is a decision and not just a bug fix.** `main` is not a release. The newest tag is
+`OFX_Release_1_4_TAG` and there is also an `OFX_Release_2_0_BRANCH`, so any given checkout sits at an
+unpredictable point in a moving range — and the project's own reference guide was written against
+whatever the author happened to have. Pinning a minimum version would have meant asking the user to
+re-clone an SDK that already works for them, to fix a problem that is entirely on our side of the
+interface.
+
+**Evidence.** Building the tree unmodified against `OFX_Release_1_4_TAG` failed with
+`kOfxStatUnlicensed: undeclared identifier`. A symbol-set diff between what the code uses and what
+1.4 declares found exactly eight names absent, of which four are referenced as identifiers rather
+than as strings or comments:
+
+| Symbol | Since | Degradation when absent |
+|---|---|---|
+| `kOfxParamTypeStrChoice` | 1.5 | Model Selection uses an index Choice; adding or removing a model file can re-point a saved project |
+| `kOfxParamHostPropSupportsStrChoice` | 1.5 | as above — the capability is reported as unsupported |
+| `kOfxParamHostPropSupportsStrChoiceAnimation` | 1.5 | as above |
+| `kOfxImageEffectPropThumbnailRender` | 1.5 | a render is never recognised as a thumbnail render, so thumbnails cost a full inference |
+| `kOfxStatUnlicensed` | after 1.4 | one entry missing from a diagnostic name table; no behavioural effect |
+
+The other four (`OfxSetHost`, `OfxImageEffectPropCudaRenderSupported`,
+`OfxImageEffectPropCudaStreamSupported`) appear only inside comments and string literals, so they
+cost nothing. The CUDA capability strings were already spelled out locally under D8 for an unrelated
+reason, which turned out to be what kept them portable.
+
+**The part that was not a compile error.** `ofxCore.h` gates `__declspec(dllexport)` on a platform
+macro, and the spelling changed on 2025-11-14 from `defined(WIN32) || defined(WIN64)` to
+`defined(_WIN32)`. MSVC defines `_WIN32` itself but not `WIN32`; CMake injects `/DWIN32` for MSVC.
+So an older SDK builds and exports correctly **under CMake only**, and fails silently under any other
+build system — an empty export table, which Resolve reports as a plugin containing no plugins, with
+no error and nothing in the log. Under `-fvisibility=hidden` on Linux the same gap drops the symbols
+from the dynamic table, which is how the 1.4 build here exposed it. Depending on a build system's
+implicit `/D` for the plugin's entire ABI is not acceptable, so `plugin/OfxEntry.cpp` owns the export
+declaration and uses compiler-defined macros only.
+
+**Rejected alternative.** `#ifdef`-guarding on the SDK's own `OfxExport` and adding `/DWIN32` to the
+MSVC flags in `CMakeLists.txt`. It would have worked, but it keeps the ABI dependent on a flag we
+control in exactly one of the build systems that might build this project, and it leaves the failure
+mode silent for anyone who builds differently.
+
+**Consequences, hand-honoured.**
+- `cmake/OpenFXSDK.cmake` reports the detected feature set *and* which `OfxExport` guard the SDK
+  uses, so an empty export table in some other project can be diagnosed from the configure banner.
+- `tools/build-install.bat` treats a missing or decorated export as a **hard build failure**, not an
+  eyeball check. The dependents list stays advisory, because Phase 3 legitimately adds
+  `onnxruntime.dll` to it.
+- The whole tree is verified against both current `main` and `OFX_Release_1_4_TAG`: 116 checks pass
+  and both binaries export exactly `OfxGetNumberOfPlugins` and `OfxGetPlugin`.
+- `CMakeLists.txt` previously carried a comment asserting that hidden visibility was safe *because*
+  `OfxExport` supplies `visibility("default")`. That claim was only true for post-2025 SDKs and has
+  been replaced.
+- When a future SDK adds a symbol we want, guard it the same way and add it to the table above.
+  A hard `#error` on an old SDK is the wrong default: degrading a slider is better than refusing to
+  build.

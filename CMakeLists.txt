@@ -194,8 +194,10 @@ if(MSVC)
   target_link_options(${OFX_PLUGIN_NAME} PRIVATE /DYNAMICBASE /NXCOMPAT /CETCOMPAT)
 else()
   target_compile_options(${OFX_PLUGIN_NAME} PRIVATE -Wall -Wextra -Wno-unused-parameter)
-  # The OFX entry points are declared `extern` + visibility("default") by OfxExport in
-  # ofxCore.h, so hidden visibility does not hide them.
+  # Hidden visibility is safe here: plugin/OfxEntry.cpp marks the two OFX entry points with its
+  # own visibility("default")/__declspec(dllexport) macro rather than relying on the SDK's
+  # OfxExport, whose platform guard varies with the age of the SDK checkout. See the comment at
+  # the top of that file.
   target_link_options(${OFX_PLUGIN_NAME} PRIVATE -Wl,--no-undefined)
 endif()
 

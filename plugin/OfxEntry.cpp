@@ -25,6 +25,33 @@
 #include "plugin/HostBridge.h"
 #include "util/Log.h"
 
+// ---------------------------------------------------------------------------
+// Export linkage. Deliberately our own macro, NOT the SDK's OfxExport.
+//
+// ofxCore.h defines OfxExport as __declspec(dllexport) only when a platform macro it recognises
+// is set, and which macro that is changed with the SDK's age:
+//
+//   SDKs up to 2025-11-14:  #if defined(WIN32) || defined(WIN64)
+//   SDKs after that:        #if defined(_WIN32)
+//
+// MSVC defines _WIN32 and _WIN64 itself but does NOT define WIN32 - that one comes from the build
+// system. CMake happens to inject /DWIN32 for MSVC, so a CMake build against an older SDK usually
+// gets away with it, but any other build (a raw MSBuild project, a different generator, someone
+// clearing COMPILE_DEFINITIONS) silently produces a .ofx with an EMPTY export table: Resolve then
+// loads the binary and reports that it contains no plugins, which is exactly the failure the
+// reference guide in docs/reference/ describes. On Linux the same omission drops the symbols out
+// of the dynamic table under -fvisibility=hidden.
+//
+// Both spellings below use only compiler-defined macros, so the entry points are exported whatever
+// the SDK checkout says. Verified on this project by building against OFX 1.4 and current main and
+// checking the export table of each result.
+// ---------------------------------------------------------------------------
+#if defined(_WIN32) || defined(_WIN64)
+#define AIBGR_OFX_ENTRY extern "C" __declspec(dllexport)
+#else
+#define AIBGR_OFX_ENTRY extern "C" __attribute__((visibility("default")))
+#endif
+
 namespace {
 
 /// Called before anything else. ofxCore.h is explicit that a plugin MUST NOT call any OFX function
@@ -61,6 +88,6 @@ OfxPlugin gPlugin = {
 
 } // namespace
 
-OfxPlugin* OfxGetPlugin(int nth) { return (nth == 0) ? &gPlugin : nullptr; }
+AIBGR_OFX_ENTRY OfxPlugin* OfxGetPlugin(int nth) { return (nth == 0) ? &gPlugin : nullptr; }
 
-int OfxGetNumberOfPlugins(void) { return 1; }
+AIBGR_OFX_ENTRY int OfxGetNumberOfPlugins(void) { return 1; }

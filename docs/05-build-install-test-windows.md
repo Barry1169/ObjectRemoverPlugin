@@ -117,6 +117,61 @@ cmake -S . -B build -DOFX_STATIC_CRT=ON
 Both checks are also worth re-running after any change to `plugin/OfxEntry.cpp`, since that is the
 only translation unit defining an exported symbol.
 
+`tools/build-install.bat` performs the export check for you and **fails the build** if either name
+is missing or decorated, rather than leaving it to be eyeballed.
+
+### Which version of the OpenFX SDK you have
+
+`main` is not a release. The newest tagged release is `OFX_Release_1_4_TAG`, and the repository also
+carries an `OFX_Release_2_0_BRANCH`, so a checkout can be anything in between. The configure banner
+reports what it found:
+
+```
+-- OpenFX SDK features: ThumbnailRender=1 SequentialRender=1 StrChoice=1 StatUnlicensed=1
+-- OpenFX SDK OfxExport guard: _WIN32 (current)
+```
+
+Nothing here needs a specific vintage. Four symbols are optional and guarded with `#ifdef`, so an
+older checkout compiles and simply loses the corresponding convenience:
+
+| Symbol | OFX version | What is lost without it |
+|---|---|---|
+| `kOfxParamTypeStrChoice`, `kOfxParamHostPropSupportsStrChoice[Animation]` | 1.5 | Model Selection falls back to an index Choice, so adding or removing a model file can re-point a saved project |
+| `kOfxImageEffectPropThumbnailRender` | 1.5 | A render is never recognised as a thumbnail render, so thumbnails cost a full inference instead of taking the fast path |
+| `kOfxStatUnlicensed` | after 1.4 | One entry missing from a diagnostic name table |
+
+The build is verified against both current `main` and `OFX_Release_1_4_TAG`; 116 checks pass and the
+export table is identical in both cases.
+
+**One thing that is not version-tolerant by accident.** `ofxCore.h` only marks the entry points
+`__declspec(dllexport)` when a platform macro it recognises is set, and which macro that is changed
+on 2025-11-14:
+
+```c
+/* SDKs up to 2025-11-14 */   #if defined(WIN32) || defined(WIN64)
+/* SDKs after that */          #if defined(_WIN32)
+```
+
+MSVC defines `_WIN32` itself but **not** `WIN32` — that one is injected by the build system. CMake
+happens to pass `/DWIN32` for MSVC, so a CMake build against an older SDK usually gets away with it.
+Any other build does not, and the result is a `.ofx` with an empty export table: Resolve loads the
+binary and reports that it contains no plugins, with no error anywhere. On Linux the same omission
+drops the symbols out of the dynamic table under `-fvisibility=hidden`.
+
+So `plugin/OfxEntry.cpp` does not use `OfxExport` at all. It declares the two entry points through
+its own macro, built from compiler-defined macros only:
+
+```cpp
+#if defined(_WIN32) || defined(_WIN64)
+#define AIBGR_OFX_ENTRY extern "C" __declspec(dllexport)
+#else
+#define AIBGR_OFX_ENTRY extern "C" __attribute__((visibility("default")))
+#endif
+```
+
+This was found by building against the 1.4 headers: the exports vanished from the resulting binary
+until the macro was introduced. Keep it.
+
 ---
 
 ## 3. Install into DaVinci Resolve
@@ -317,8 +372,12 @@ Save results into `docs/test-results/phaseN.md` — a real record, not a claim.
 
 ## 8. Things that will bite, pre-emptively noted
 
-1. **Missing `__declspec(dllexport)` on the three `Ofx*` entry points** → plugin does not appear, no
-   error. Always `dumpbin /exports` and `dumpbin /dependents` first (§2).
+1. **Missing `__declspec(dllexport)` on the two `Ofx*` entry points** → plugin does not appear, no
+   error, no crash, nothing in the log. Always `dumpbin /exports` and `dumpbin /dependents` first
+   (§2). Do not export `OfxSetHost`: a host that finds it treats a `kOfxStatFailed` return as "skip
+   this plugin silently" (docs/03, D10). The project guards against this class of failure with its
+   own export macro instead of the SDK's `OfxExport` — see "Which version of the OpenFX SDK you
+   have" in §2 for why.
 2. **`.ofx` is a renamed DLL** — the CMake target must set `SUFFIX ".ofx"` and `PREFIX ""`, or Resolve
    will not find it.
 3. **Bundle layout** must be `<Name>.ofx.bundle/Contents/Win64/<Name>.ofx`. A loose `.ofx` is ignored.
