@@ -346,9 +346,10 @@ void applyResetRefinement(const ParamReader& params, double time) noexcept {
 void applyLogSettings(const ParamReader& params, double time) noexcept {
     Log& log = Log::instance();
 
-    int level = 1;
+    // 2 = Info, matching both the inspector control's default and the build-time startup level.
+    int level = 2;
     if (!params.getInt(pname::kLogLevel, time, level)) {
-        level = 1;
+        level = 2;
     }
     log.setLevel(static_cast<LogLevel>(std::min(3, std::max(0, level))));
 

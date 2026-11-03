@@ -128,7 +128,7 @@ only translation unit defining an exported symbol.
    ```
    Administrator permission is required. Create the `Plugins` folder if it does not exist.
 3. Copy your chosen ONNX Runtime DLLs next to the `.ofx` (§4).
-4. Put the model files in `%ProgramData%\<Vendor>\AiBgRemover\models\` (§5).
+4. Put the model files in `%ProgramData%\AiBgRemover\models\` (§5).
 5. Start Resolve → **Effects → OpenFX → AI Matting → AI Background Remover**.
 6. Confirm it is listed and enabled in **Preferences → System → Video Plugins**.
 
@@ -143,7 +143,7 @@ Rename-Item "$sup\OFXPluginCacheV2.xml" "OFXPluginCacheV2.xml.old" -ErrorAction 
 Then check, in order: (a) is it the `.ofx.bundle` *folder* in the right place, (b) does `dumpbin`
 show the two undecorated exports and only `KERNEL32.dll` as a dependent (§2), (c) is the plugin
 enabled in Video Plugins, (d) does
-`%ProgramData%\<Vendor>\AiBgRemover\log.txt` show a load attempt. Also note that `OFX_PLUGIN_PATH`,
+`%ProgramData%\AiBgRemover\log.txt` show a load attempt. Also note that `OFX_PLUGIN_PATH`,
 if set on your system, is searched *before* the default folder — check it is not shadowing anything.
 
 **If Resolve hangs at "Loading Video Plugins":** rename the `Plugins` folder to `Plugins.orig`,
@@ -199,7 +199,7 @@ no way to measure your hardware from here.
 
 ```powershell
 cd D:\AI-Effects\ObjectRemoverPlugin
-python tools\fetch_models.py --out "$env:ProgramData\<Vendor>\AiBgRemover\models" --variant auto
+python tools\fetch_models.py --out "$env:ProgramData\AiBgRemover\models" --variant auto
 ```
 
 `fetch_models.py` will:
@@ -277,7 +277,7 @@ aspirational until the phase that produces them lands. Do not expect them to run
 build\hostharness\ofx_harness.exe --plugin build\AiBgRemover.ofx --case passthrough_float
 
 :: inference benchmark (Phase 3): needs onnxruntime.dll plus a model
-build\bench\bench.exe --model "%ProgramData%\<Vendor>\AiBgRemover\models\birefnet_lite_512.onnx" ^
+build\bench\bench.exe --model "%ProgramData%\AiBgRemover\models\birefnet_lite_512.onnx" ^
                       --eps cpu,dml,cuda --res 384,512,768,1024 --frames 20 --report bench.md
 ```
 

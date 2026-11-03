@@ -466,10 +466,14 @@ Result defineParameters(OfxParamSetHandle paramSet, const std::vector<ModelChoic
     // --- Tab 6: Diagnostics ---------------------------------------------------
     defineGroup(d, pname::kGroupDiag, "Diagnostics", /*open*/ false);
 
+    // Default Info, not Errors: the host capability dump and the per-frame render summary are both
+    // logged at Info, and they are the first things to read when the plugin misbehaves in Resolve.
     defineChoice(d, pname::kLogLevel, "Log Level",
-                 "Verbose also traces every host action, which is the fastest way to find out "
-                 "what the host is actually doing. The log path is shown below.",
-                 pname::kGroupDiag, logLevelOptions(), 1);
+                 "Info (the default) records what the host advertises at load and one line per "
+                 "render. Verbose additionally traces every host action and every property that "
+                 "failed to set, which is the fastest way to find out what the host is actually "
+                 "doing. Off writes nothing. The log path is shown below.",
+                 pname::kGroupDiag, logLevelOptions(), 2);
 
     defineReadOnlyString(d, pname::kStatusText, "Status",
                          "What the plugin last did: which model, which execution provider, the "

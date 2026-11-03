@@ -635,13 +635,22 @@ OfxStatus pluginMain(const char* action, const void* handle, OfxPropertySetHandl
 
         // --- lifetime -------------------------------------------------------
         if (std::strcmp(action, kOfxActionLoad) == 0) {
+            // Open the log FIRST. acquireSuites() is what writes the host capability dump that
+            // answers V7, and if the file is not open yet those lines go nowhere - which would make
+            // the single most useful diagnostic of the first Resolve run invisible.
+            if (ensurePluginDataDir()) {
+                Log::instance().setFilePath(defaultLogPath());
+                AIBGR_LOGI("=== %s v%s loaded into a new host ===", AIBGR_PLUGIN_LABEL,
+                           AIBGR_PLUGIN_VERSION_STRING);
+            } else {
+                // No writable data directory, so there is no log to read. Continue anyway: the
+                // plugin works without one, it is just much harder to diagnose.
+            }
+
             const Result r = bridge.acquireSuites();
             if (!r.ok()) {
                 AIBGR_LOGE("Load: %s", r.toString().c_str());
                 return kOfxStatFailed;
-            }
-            if (ensurePluginDataDir()) {
-                Log::instance().setFilePath(defaultLogPath());
             }
             AIBGR_LOGI("Load: %s v%s ready", AIBGR_PLUGIN_LABEL, AIBGR_PLUGIN_VERSION_STRING);
             return kOfxStatOK;

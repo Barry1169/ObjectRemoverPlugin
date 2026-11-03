@@ -85,6 +85,13 @@ Log::Log() noexcept {
 #if defined(AIBGR_TRACE_ACTIONS_DEFAULT)
     traceActions_ = (AIBGR_TRACE_ACTIONS_DEFAULT != 0);
 #endif
+#if defined(AIBGR_DEFAULT_LOG_LEVEL)
+    // Baked in at configure time (CMake option OFX_DEFAULT_LOG_LEVEL) rather than hardcoded,
+    // because the useful default differs between bring-up and shipping. This covers the window
+    // between Load and the first CreateInstance, where no inspector control exists yet to read -
+    // which is exactly when the host capability dump happens.
+    level_ = static_cast<LogLevel>(AIBGR_DEFAULT_LOG_LEVEL);
+#endif
 }
 
 Log::~Log() = default;

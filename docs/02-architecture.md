@@ -442,7 +442,7 @@ transparency control:
 | Param | OFX type | Default | Description |
 |---|---|---|---|
 | `statusText` | String (read-only) | `""` | Last-known state: model path, EP actually used, matte resolution, last inference ms, cache hit rate. Best-effort — hosts differ in when they refresh string params. |
-| `logLevel` | Choice `Off`/`Errors`/`Info`/`Verbose` | `Errors` | Mirrors to the OFX log and to `%ProgramData%\<Vendor>\<Plugin>\log.txt`. |
+| `logLevel` | Choice `Off`/`Errors`/`Info`/`Verbose` | **`Info`** | Writes to `%ProgramData%\AiBgRemover\log.txt`. **Info, not Errors:** the host capability dump and the one-line-per-render summary are both logged at Info, and they are the first things to read when the plugin misbehaves. Verbose additionally traces every host action and every property that failed to set. A separate CMake option `OFX_DEFAULT_LOG_LEVEL` (default `Info`) sets the level in force between `kOfxActionLoad` and the first `CreateInstance`, when no inspector control exists yet — which is exactly when the capability dump happens. |
 | `failLoudly` | Boolean | false | Development aid — see §4.3. |
 | `dumpMatte` | PushButton | — | Writes the current matte to a PNG next to the log for offline inspection. |
 
@@ -466,7 +466,7 @@ C:\Program Files\Common Files\OFX\Plugins\
             ├── (cudart64_*.dll, cublas*.dll, cudnn64_*.dll …)   # only with the CUDA flavour
             └── THIRD_PARTY_LICENSES.txt
 
-%ProgramData%\<Vendor>\AiBgRemover\
+%ProgramData%\AiBgRemover\
 ├── models\
 │   ├── manifest.json
 │   ├── birefnet_lite_512_fp16_stdops.onnx

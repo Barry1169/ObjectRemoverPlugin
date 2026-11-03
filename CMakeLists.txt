@@ -53,6 +53,14 @@ option(BUILD_TESTS "Build the unit-test executable (no GPU, no ONNX Runtime, no 
 option(OFX_SANITIZERS "Build tests with AddressSanitizer + UBSan (GCC/Clang only)" OFF)
 option(OFX_TRACE_ACTIONS
        "Default the action-trace log ON in Debug builds (see docs: 'the debug log trick')" ON)
+
+# The log level in effect between kOfxActionLoad and the first CreateInstance, i.e. before any
+# inspector control exists to read. Info captures the host capability dump (which answers V7) and
+# the per-render summary; Verbose adds every host action and every property that failed to set.
+set(OFX_DEFAULT_LOG_LEVEL
+    "Info"
+    CACHE STRING "Startup log level before the inspector's own Log Level control takes over")
+set_property(CACHE OFX_DEFAULT_LOG_LEVEL PROPERTY STRINGS Off Error Info Verbose)
 option(OFX_STATIC_CRT
        "MSVC: link the C runtime statically so the .ofx depends only on KERNEL32.dll" ON)
 
@@ -65,6 +73,20 @@ set(OFX_INSTALL_BUNDLE_ROOT
 
 if(NOT OFX_CXX_STANDARD MATCHES "^(17|20)$")
   message(FATAL_ERROR "OFX_CXX_STANDARD must be 17 or 20 (got '${OFX_CXX_STANDARD}')")
+endif()
+
+# LogLevel enum order in util/Log.h: Off=0, Error=1, Info=2, Verbose=3.
+if(OFX_DEFAULT_LOG_LEVEL STREQUAL "Off")
+  set(AIBGR_DEFAULT_LOG_LEVEL_VALUE 0)
+elseif(OFX_DEFAULT_LOG_LEVEL STREQUAL "Error")
+  set(AIBGR_DEFAULT_LOG_LEVEL_VALUE 1)
+elseif(OFX_DEFAULT_LOG_LEVEL STREQUAL "Info")
+  set(AIBGR_DEFAULT_LOG_LEVEL_VALUE 2)
+elseif(OFX_DEFAULT_LOG_LEVEL STREQUAL "Verbose")
+  set(AIBGR_DEFAULT_LOG_LEVEL_VALUE 3)
+else()
+  message(FATAL_ERROR
+    "OFX_DEFAULT_LOG_LEVEL must be one of Off, Error, Info, Verbose (got '${OFX_DEFAULT_LOG_LEVEL}')")
 endif()
 
 set(CMAKE_CXX_STANDARD ${OFX_CXX_STANDARD})
@@ -122,6 +144,11 @@ if(MSVC)
 else()
   target_compile_options(aibgr_core PRIVATE -Wall -Wextra -Wno-unused-parameter)
 endif()
+
+# util/Log.cpp lives in aibgr_core, so the startup level is defined there and inherited by
+# everything that links it.
+target_compile_definitions(aibgr_core PUBLIC
+  AIBGR_DEFAULT_LOG_LEVEL=${AIBGR_DEFAULT_LOG_LEVEL_VALUE})
 
 if(OFX_SANITIZERS AND NOT MSVC)
   target_compile_options(aibgr_core PUBLIC -fsanitize=address,undefined -fno-omit-frame-pointer)
@@ -217,5 +244,6 @@ message(STATUS "   C++ standard       : ${OFX_CXX_STANDARD}")
 message(STATUS "   Unique ID          : ${AIBGR_PLUGIN_UNIQUE_ID}")
 message(STATUS "   Label / Grouping   : ${OFX_PLUGIN_LABEL} / ${OFX_PLUGIN_GROUPING}")
 message(STATUS "   Bundle output      : ${AIBGR_BUNDLE_STAGING}")
+message(STATUS "   Startup log level  : ${OFX_DEFAULT_LOG_LEVEL}")
 message(STATUS "   Tests              : ${BUILD_TESTS}")
 message(STATUS "------------------------------------------------------------------")

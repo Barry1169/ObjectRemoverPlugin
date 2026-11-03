@@ -31,7 +31,7 @@ Phase 3 and later will add, in the same folder:
     cudnn64_*.dll, ... .............. NVIDIA EULA  (section 4 — READ THIS, it is
                                                     NOT an open-source licence)
 
-And outside the bundle, under %ProgramData%\<Vendor>\AiBgRemover\models\:
+And outside the bundle, under %ProgramData%\AiBgRemover\models\:
 
     BiRefNet / small-matte weights .. per-model     (section 5)
 
@@ -184,7 +184,7 @@ Until then the CUDA path is a local-build option, not a redistributable one.
 ================================================================================
 
 No model file is redistributed by this project at this time. Models are placed by
-the user under %ProgramData%\<Vendor>\AiBgRemover\models\, which keeps them out of
+the user under %ProgramData%\AiBgRemover\models\, which keeps them out of
 Program Files and out of the bundle.
 
 What has been established about the candidates, and what has not:
