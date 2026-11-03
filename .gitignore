@@ -48,3 +48,7 @@ nvrtc64*.dll
 docs/test-results/
 Testing/
 bench-*.md
+
+# Downloaded AI runtime and diagnostics
+runtime/
+log.txt

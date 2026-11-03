@@ -16,7 +16,12 @@ std::string pluginDataDir();
 /// <pluginDataDir>/models - first place model files are looked for.
 std::string modelsDir();
 
-/// Prefer log.txt beside the .ofx; if unavailable use the writable data directory, then user cache.
+/// User-selected working folder and paths for the optional CPU model/runtime.
+std::string workspaceDir();
+std::string aiModelPath();
+std::string aiRuntimePath();
+
+/// Prefer log.txt in the configured workspace; fall back to the data directory, then user cache.
 /// Returns an empty string if no candidate can be opened. Never changes the directory permissions.
 std::string selectWritableLogPath(const std::string& preferred, const std::string& fallback);
 std::string preferredLogPath();

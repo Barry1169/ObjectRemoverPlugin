@@ -1,31 +1,22 @@
 # AI Background Remover — OFX Plugin for DaVinci Resolve
 
-**Status: Phases 1–2 implemented; a previous build loaded and rendered in Resolve 21.1 on the
-user's Windows machine, but crashed during playback and settings changes. The stability changes
-below have been tested on Linux, not yet rebuilt with MSVC or verified in Resolve.**
-
-That distinction matters and is repeated deliberately throughout these documents. The host-agnostic
-layers (pixel conversion, colour, matte resampling, compositing, the pipeline orchestrator) are built
-and pass 116 unit checks, clean under AddressSanitizer and UndefinedBehaviorSanitizer. The OFX layer
-compiles against the real SDK headers and produces a binary exporting exactly the two required entry
-points. **No AI inference exists yet** — the plugin currently offers only its built-in border-colour
-key. The user-provided log shows successful fallback-key renders as well as a rapid repeated
-instance-change sequence; it does not establish the crash cause.
+**Current status:** U2NetP AI segmentation runs on CPU when the optional model and ONNX Runtime
+are installed. It has been tested using real inference on Linux, including a fake OFX host. The
+Windows build, Windows runtime loading, Resolve result and previously reported playback crashes
+still need verification. The original colour-key fallback remains available.
 
 ## Current controls and log location
 
-The current matte is a simple key based on the border colour, not AI segmentation. In Background
-Removal, **Background Colour Tolerance** and **Background Colour Softness** adjust that key. Matte
-Bias and the output controls also work. Despeckle, Refine Edges, Edge Feather, Edge Expansion and
-Foreground Smoothing remain unimplemented; their labels say so. Larger-subject selection, GPU,
-temporal controls and model selection remain planned, not functional AI features.
+Choose **U2NetP (AI, CPU)** under Model Selection after installing the AI files and restarting
+Resolve. Existing effects may retain **No AI model** and need to be switched manually. Matte Bias,
+invert and output controls apply to AI; Background Colour Tolerance and Softness apply only to the
+colour key. Edge refinement, GPU and temporal features are not implemented yet. AI is fixed at
+320×320, may be slow on CPU and is not expected to produce fine hair-level matting.
 
-The preferred log is `AiBgRemover.ofx.bundle/Contents/Win64/log.txt`, alongside the `.ofx`. The
-installer grants the local Windows Users group write access to that **file only**, not to the plugin
-folder or executable. If it is unavailable, the plugin tries `%ProgramData%\AiBgRemover\log.txt`,
-then `%LOCALAPPDATA%\AiBgRemover\log.txt`. The log-path label is selected at load and may be stale
-in old saved projects. The installer backs up a previous bundle log before replacing or removing the
-bundle. These Windows paths and permissions still need verification on a Windows machine.
+The preferred log is `D:\AI-Effects\ObjectRemoverPlugin-Fix\log.txt` when building from that
+checkout. If unavailable, the plugin tries `%ProgramData%\AiBgRemover\log.txt`, then
+`%LOCALAPPDATA%\AiBgRemover\log.txt`. Existing projects may show stale static labels. The
+installer preserves any old bundle log before replacement. See the [Windows guide](05-build-install-test-windows.md).
 
 ## Stability update
 
@@ -36,6 +27,9 @@ purges and overlapping renders. A fake OFX host tests these paths; it is not a s
 Resolve. See the Windows guide's stability retest before using this build on a real project.
 
 ## Documents
+
+The planning documents below include historical proposals; the Windows guide and the current
+status above take precedence over proposed features and acquisition paths.
 
 | Doc | What it answers |
 |---|---|
@@ -50,11 +44,9 @@ Also in the repository, outside `docs/`: `packaging/THIRD_PARTY_LICENSES.txt`, w
 which third-party components are redistributed at each phase — including the fact that the NVIDIA
 CUDA/cuDNN DLLs the CUDA build needs are **not** open source and are not cleared for redistribution.
 
-## The short version
+## Historical design proposals (not current feature status)
 
-1. **Runtime:** ONNX Runtime, loaded *dynamically at run time* (`LoadLibraryW` + `OrtGetApiBase`), so
-   one plugin binary works against a CPU-only, DirectML, or CUDA ONNX Runtime and degrades gracefully
-   when the DLL is absent. Staged bring-up **CPU → DirectML → CUDA**. Not implemented yet (Phase 3).
+1. **Runtime:** ONNX Runtime, loaded *dynamically at run time* (`LoadLibraryW` + `OrtGetApiBase`), with CPU support implemented. GPU execution providers remain future work.
 2. **Model:** **BiRefNet_lite (MIT)** as the quality default, with a small portrait/general model for
    speed and low VRAM. RVM is rejected outright (GPL-3.0, incompatible with a plugin loaded into a
    proprietary host); SAM 2 needs interactive prompts; MODNet's *weights* may be CC BY-NC-SA despite

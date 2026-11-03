@@ -1,45 +1,69 @@
 # 05 — Windows Build, Install, Model Acquisition, and Test Recipe
 
-**Status: draft.** The exact generator name, MSVC toolset string, and any `/std:` or warning flags
-will be finalised in Phase 0 once `tools/probe-env.ps1` reports your real toolchain (V4). Nothing
-of the earlier build was later exercised on Windows; the current stability patch still needs a Windows/Resolve retest.
+**Current implementation:** U2NetP AI on CPU is optional and tested with real inference on Linux.
+The Windows installation, DLL loading, Resolve rendering and reported playback crashes require
+verification. Back up projects, logs and the existing bundle before testing in a disposable project.
 
----
+## Quick start for this checkout
 
-## Stability retest after a Resolve crash
+Close Resolve completely. In an x64 Native Tools Command Prompt:
 
-A prior Windows build loaded and rendered in Resolve 21.1, but the user reported crashes on
-playback and when changing settings. A rapid sequence of `InstanceChanged` actions in the log is
-consistent with a possible diagnostic-parameter feedback loop; the cause is not yet confirmed.
-This version removes diagnostic parameter writes from render/setting callbacks, declares
-instance-safe rendering, and protects reusable buffers from simultaneous rendering/cache purges.
-The Diagnostics Status and Log File labels are now static defaults; consult the log for details.
-Existing saved projects may retain an older label value.
+```bat
+cd /d D:\AI-Effects\ObjectRemoverPlugin-Fix
+git pull --ff-only
+powershell -NoProfile -ExecutionPolicy Bypass -File tools\setup-ai.ps1
+tools\build-install.bat build
+```
 
-1. Back up the project and logs. Close Resolve completely.
-2. Get the current session's changes onto the Windows machine. From an x64 Native Tools Command
-   Prompt, run `tools\build-install.bat build`. It builds, runs both core and fake-host tests,
-   checks exports, and stages the bundle without installing it.
-3. Back up the old `AiBgRemover.ofx.bundle`. Run `tools\build-install.bat` as administrator to
-   install the new bundle. The script backs up an existing bundle log under ProgramData before
-   replacing the previous bundle. Back up your project and bundle too.
-4. In a **new disposable Resolve project**, apply the effect, change settings, then try playback and
-   scrubbing. If Resolve crashes, stop testing and share the new plugin log and Resolve crash report.
-   This patch has not yet been validated with MSVC or Resolve; success in the fake host is not proof
-   that the crash is fixed. The plugin still uses a basic color key, not AI segmentation.
+The setup downloads the U2NetP model (~5 MB) and Microsoft CPU runtime ZIP (~78 MB), verifies their
+SHA-256 hashes and installs them under this checkout's `models` and `runtime` directories. It never
+overwrites an existing file. An existing model must match the expected hash; an existing DLL is left
+untouched and is not verified by the script. Downloads require internet; rendering is offline.
 
-## Log location
+Then, with Resolve still closed, run the following **in an Administrator command prompt**:
 
-The preferred log is next to the installed `.ofx`:
-`C:\Program Files\Common Files\OFX\Plugins\AiBgRemover.ofx.bundle\Contents\Win64\log.txt`.
-The administrator-run installer creates this file and grants the Windows Users group write access
-only to the log file. It does not grant write access to the plugin binary or folder. If opening the
-file for appending fails, the plugin tries `%ProgramData%\AiBgRemover\log.txt`, then
-`%LOCALAPPDATA%\AiBgRemover\log.txt`; if all fail, it continues without a log. The actual choice
-is reflected in the static log-path parameter on load, but an old project may retain a stale value.
-Before reinstall or uninstall, the script saves the bundle log to a uniquely named
-`previous-log-*.txt` in `%ProgramData%\AiBgRemover`; it stops if that backup fails. Existing
-ProgramData logs are not deleted. These Windows-specific steps need real Windows validation.
+```bat
+cd /d D:\AI-Effects\ObjectRemoverPlugin-Fix
+tools\build-install.bat
+```
+
+Start Resolve and test in a **new disposable project**. In Background Removal > Model Selection,
+choose **U2NetP (AI, CPU)**. Existing effect instances may keep **No AI model (built-in colour key)**;
+change them explicitly. Use Output Mode `Matte Only` to inspect the mask; Matte Bias changes the
+mask. Background Colour Tolerance/Softness only affect the colour key, not AI. If AI is missing,
+check both files below, close and restart Resolve, and inspect the log. If an AI model fails to load,
+the colour key is used; a per-frame inference error passes the original image through and is logged.
+Look for `AI loaded` and a non-thumbnail render with `fallback=0`; also check for any
+`matte source` errors, which cause that frame to pass through.
+
+* `D:\AI-Effects\ObjectRemoverPlugin-Fix\models\u2netp.onnx`
+* `D:\AI-Effects\ObjectRemoverPlugin-Fix\runtime\onnxruntime.dll`
+* Preferred log: `D:\AI-Effects\ObjectRemoverPlugin-Fix\log.txt`
+
+The build script sets the workspace to its checkout directory, so moving the checkout requires
+rebuilding and reinstalling. If the log cannot be written there, the plugin tries
+`%ProgramData%\AiBgRemover\log.txt`, then `%LOCALAPPDATA%\AiBgRemover\log.txt`. A static
+inspector log label in an old project can be stale. The installer preserves prior bundle logs.
+
+U2NetP works on each frame independently at a fixed 320×320. CPU playback may be slow; no GPU,
+temporal stability, hair refinement or prompt-based object selection is implemented. The model may
+produce imperfect masks. The plugin uses two CPU inference threads per instance. Windows may need
+the appropriate Microsoft Visual C++ runtime for the separately downloaded ONNX Runtime DLL.
+
+## Provenance and licensing
+
+The ONNX Runtime C API header and license are included under `third_party/onnxruntime` (MIT).
+The setup script downloads the Microsoft ONNX Runtime 1.23.2 Windows CPU release (MIT) and the
+U2NetP ONNX model published by [rembg](https://github.com/danielgatis/rembg). The
+[U-2-Net source repository](https://github.com/xuebinqin/U-2-Net) uses Apache-2.0, but that alone
+does not establish licensing of these particular exported weights or their training data. Verify the
+weights' terms independently before redistribution or commercial use. The project does not bundle
+the model or DLL. Do not confuse checksum verification with a license grant.
+
+## Older detailed build notes
+
+The sections below are historical planning notes. Where they conflict with the quick start above,
+the quick start and current implementation take precedence.
 
 ## 1. Prerequisites
 
@@ -55,8 +79,7 @@ ProgramData logs are not deleted. These Windows-specific steps need real Windows
 
 No Conan. No vcpkg. No Python required to build (Python is only for `tools/*.py`).
 
-The plugin does **not** link against `onnxruntime.lib`. It resolves the ORT C API at run time, so the
-build needs no ONNX Runtime headers or libraries at all. This is deliberate — see doc 03 §D1.
+The plugin does **not** link against `onnxruntime.lib`. It resolves the ORT C API at run time using the vendored header; the build needs no separately installed ONNX Runtime libraries. This is deliberate — see doc 03 §D1.
 
 ---
 
@@ -217,8 +240,7 @@ until the macro was introduced. Keep it.
    C:\Program Files\Common Files\OFX\Plugins\
    ```
    Administrator permission is required. Create the `Plugins` folder if it does not exist.
-3. Copy your chosen ONNX Runtime DLLs next to the `.ofx` (§4).
-4. Put the model files in `%ProgramData%\AiBgRemover\models\` (§5).
+3. Use `tools\setup-ai.ps1` to install the supported CPU runtime and model into the checkout (§4–5).
 5. Start Resolve → **Effects → OpenFX → AI Matting → AI Background Remover**.
 6. Confirm it is listed and enabled in **Preferences → System → Video Plugins**.
 
@@ -242,73 +264,10 @@ pass through rather than fail (doc 03 §D9), but this is the recovery path if an
 
 ---
 
-## 4. Choosing and installing ONNX Runtime
+## 4–5. Runtime and model acquisition
 
-Pick **one** `onnxruntime.dll` and place it next to the `.ofx`. The plugin probes and adapts; it does
-not care which you chose.
-
-### Option A — CPU (recommended to start; smallest, always works)
-
-Download `onnxruntime-win-x64-1.31.1.zip` (82.9 MB) from the `microsoft/onnxruntime` GitHub release
-v1.31.1. Copy `lib\onnxruntime.dll` (and `onnxruntime_providers_shared.dll` if present) next to the
-`.ofx`. Done. Expect seconds-per-frame, not real time.
-
-### Option B — DirectML (GPU, no CUDA install)
-
-The last published DirectML build is **1.24.4** (March 2026). DirectML is in "sustained engineering"
-— Microsoft recommends WinML for new Windows projects — but it is functional and it is by far the
-lowest-friction GPU path. Get `onnxruntime.dll` + `DirectML.dll` from the
-`Microsoft.ML.OnnxRuntime.DirectML` 1.24.4 NuGet package (native `runtimes\win-x64\native\`) and copy
-both next to the `.ofx`.
-
-⚠️ **DML has no `DeformConv` kernel in ORT.** With this option you must use the `*_stdops.onnx` model
-variant (doc 01 §6.2, doc 03 §D3).
-
-### Option C — CUDA (fastest on your RTX 2050; heaviest install)
-
-Your driver reports CUDA 13.3 UMD, so `onnxruntime-win-x64-gpu_cuda13-1.31.1.zip` (309.1 MB) is the
-match. It requires **cuDNN 9.x** and the CUDA 13 runtime DLLs (`cudart64_*`, `cublas64_*`,
-`cublasLt64_*`, `cudnn64_*`, `cufft64_*`, `curand64_*`, `nvrtc64_*`, `libnvJitLink-*`) — roughly
-**1.5–3 GB**. Either install the CUDA Toolkit + cuDNN system-wide, or drop those DLLs next to the
-`.ofx`; the plugin adds its own directory to the DLL search path so a self-contained folder works.
-
-Because 4 GB is tight with Resolve also on the GPU, set **GPU Memory Limit = 2048 MB** in the
-inspector (this maps to ORT's `gpu_mem_limit` plus `arena_extend_strategy=kSameAsRequested`).
-
-`*_deformconv.onnx` is the better model variant here (native CUDA `DeformConv` kernel).
-
-### Deciding between them
-
-`tools/bench` (Phase 3.10) prints latency, peak process memory and VRAM for every EP × model ×
-resolution combination on **your** machine. Choose from that table, not from this document — I have
-no way to measure your hardware from here.
-
----
-
-## 5. Model acquisition (one-time, online; the plugin is offline afterwards)
-
-```powershell
-cd D:\AI-Effects\ObjectRemoverPlugin
-python tools\fetch_models.py --out "$env:ProgramData\AiBgRemover\models" --variant auto
-```
-
-`fetch_models.py` will:
-- resolve the model set for the chosen EP (`stdops` for DML, `deformconv` for CUDA/CPU),
-- download with pinned SHA-256 and refuse to write a mismatched file,
-- write `manifest.json` (path, sha256, input size, normalisation, op variant, license, attribution),
-- print a license summary so nothing non-redistributable slips in.
-
-`huggingface.co` is **not reachable from this sandbox**, so the exact URLs, filenames and hashes will
-be filled in during Phase 3.8 with your input or from a machine that can reach them. Until then,
-treat the model list in doc 01 §6.3 as the *selection*, not as verified download links.
-
-Minimum viable set for a first Resolve test: **one BiRefNet_lite ONNX at 512², FP16**. Roughly
-100–250 MB.
-
-**License rule for this project:** only MIT or Apache-2.0 weights ship in an installer. MODNet is
-excluded until V10 is resolved; RMBG-* is excluded permanently (non-commercial).
-
----
+Use `tools\setup-ai.ps1` as described in the quick start above. Other execution providers and other
+models discussed in older planning documents are **not implemented** in this build.
 
 ## 6. Running the tests
 
@@ -330,8 +289,9 @@ build\aibgr_tests.exe premultiply
 116 test(s) run, 0 check(s) failed
 ```
 
-The same 116 checks pass under AddressSanitizer + UndefinedBehaviorSanitizer with leak detection
-enabled, so the host-agnostic layers are clean on memory errors, undefined behaviour and leaks:
+This earlier result predates the AI implementation; the AI code has since also been tested with
+AddressSanitizer and UndefinedBehaviorSanitizer on Linux. Sanitizers do not establish Windows or
+Resolve compatibility:
 
 ```bat
 cmake -S . -B build-asan -DCMAKE_BUILD_TYPE=Debug -DOFX_SANITIZERS=ON ^
@@ -384,28 +344,19 @@ what Resolve does (doc 03 §D10).
 
 ## 7. Manual Resolve test matrix
 
-Save results into `docs/test-results/phaseN.md` — a real record, not a claim.
+These are **tests to perform**, not claims about results. Use a disposable project and stop if
+Resolve crashes; share the plugin log and Resolve crash report.
 
-| # | Setup | Expected |
-|---|---|---|
-| 1 | 1080p 8-bit H.264 clip, Color page, node with plugin, `enable` off | Image bit-identical to bypassed node; plugin reports identity |
-| 2 | Same, `enable` on, model present | Subject isolated, background transparent (checkerboard over a solid-color node beneath) |
-| 3 | Same, model file deleted | Pass-through; Diagnostics status names the missing file; **Resolve does not crash or disable the plugin** |
-| 4 | Same, `onnxruntime.dll` deleted | Pass-through; status says ONNX Runtime not found |
-| 5 | All four `outputMode` values | Foreground / Background / Matte / Composite each behave as documented |
-| 6 | `backgroundTransparency` 0 → 1 | Background fades in smoothly, subject unchanged |
-| 7 | 4K timeline, float, Color page | Works; check peak VRAM in Task Manager; no OOM |
-| 8 | Proxy playback at 1/2 and 1/4 | Follows host scale; no crash; matte still sensible |
-| 9 | Scrub backwards and forwards rapidly | No ghosting, no stale matte, no crash |
-| 10 | 200-frame video, moving subject, `temporalStrength` 0 vs 0.35 | Flicker visibly reduced at 0.35; no smear on fast motion |
-| 11 | Hard cut inside the clip | No matte bleed across the cut |
-| 12 | Two nodes using the plugin on the same timeline | Both work; model loaded once; VRAM does not double |
-| 13 | Still image, `quality` = Maximum (1024) | Best edges; note the render time |
-| 14 | 9:16, 2.39:1, 1:1 aspect ratios | Correct matte, no stretch |
-| 15 | Detailed-hair portrait | Individual strands visible in the alpha, not a hard cut-out |
-| 16 | Full render of a 30 s clip to ProRes/DNxHR | No crash, no drift, alpha preserved in the output |
-| 17 | Restart Resolve, reopen the project | Settings persist; plugin still found |
-| 18 | Edit page vs Color page vs Fusion page | Behaves consistently; log any per-page premultiplication difference (V14) |
+1. With AI files installed, select U2NetP, render a frame, and inspect Matte Only. Confirm the log
+   says `AI loaded` and the render reports `fallback=0` without a matte-source error.
+2. Adjust Matte Bias and output mode; compare against the colour-key-only tolerance and softness.
+3. Test scrubbing, playback, two effect instances and a short export, watching for crashes or stalls.
+4. Test a missing or corrupt model/runtime separately with Resolve closed before changing files;
+   confirm the colour-key fallback and explanatory log. Restore the files afterwards.
+5. Reopen the project and check the selection persists. Existing key instances stay on the key.
+
+CPU speed, visual quality, hair detail, playback stability and every Windows-specific behavior are
+not established by Linux tests. Temporal/GPU/cache controls are not functional yet.
 
 ---
 
@@ -429,13 +380,9 @@ Save results into `docs/test-results/phaseN.md` — a real record, not a claim.
 3. **`.ofx` is a renamed DLL** — the CMake target must set `SUFFIX ".ofx"` and `PREFIX ""`, or Resolve
    will not find it.
 4. **Bundle layout** must be `<Name>.ofx.bundle/Contents/Win64/<Name>.ofx`. A loose `.ofx` is ignored.
-5. **`onnxruntime.dll` not next to the `.ofx`** → Windows will not search `Program Files\Common Files`
-   by default; the plugin adds its own directory to the DLL search path, but keep the DLL adjacent.
-6. **CUDA DLL search inside Resolve** — Resolve's process `PATH` will not include your CUDA folders.
-   The plugin must `AddDllDirectory`/preload from its own folder. This is a known trap and is handled
-   in `util/win/Paths`.
-7. **4 GB VRAM shared with the desktop and Resolve** — cap ORT's arena. Do not set
-   `maxConcurrentInference` above 1.
+5. **AI runtime path** — the plugin loads the DLL from the configured checkout's `runtime` folder.
+6. **GPU providers** — not implemented yet; this version uses CPU only.
+7. **Per-instance resources** — each effect instance creates its own CPU inference session.
 8. **Antivirus / SmartScreen** on an unsigned DLL in `Program Files` can silently block the load.
    Code-signing is out of scope here but worth knowing.
 9. **Resolve auto-disables a plugin that crashed at startup** and records it in

@@ -49,7 +49,7 @@ const char* modelIdName(ModelId m) noexcept {
     case ModelId::BirefNetLite: return "BiRefNet Lite";
     case ModelId::BirefNetGeneral: return "BiRefNet General";
     case ModelId::BirefNetPortrait: return "BiRefNet Portrait";
-    case ModelId::SmallMatte: return "Small Matte";
+    case ModelId::SmallMatte: return "U2NetP CPU";
     case ModelId::ViTMatte: return "ViTMatte (detail refine)";
     }
     return "?";

@@ -14,30 +14,18 @@ what determines whether its licence imposes an obligation on you.
 SUMMARY — WHAT IS IN THE BUNDLE
 --------------------------------------------------------------------------------
 
-Phase 2 (current state of this repository):
+Current repository:
 
     AiBgRemover.ofx ................. this project, MIT
     THIRD_PARTY_LICENSES.txt ........ this file
+    ONNX Runtime C API header ....... MIT (vendored source/header)
 
-    Nothing else. No ONNX Runtime, no model weights, no vendor DLLs. The plugin
-    currently offers only its built-in border-colour key.
+No runtime DLL or model weights are included in the plugin bundle. The optional
+setup script separately downloads Microsoft's CPU ONNX Runtime and rembg's U2NetP
+model into the user's checkout. See section 2 and section 5 for provenance,
+license terms and unresolved weights licensing. No GPU provider is implemented.
 
-Phase 3 and later will add, in the same folder:
-
-    onnxruntime.dll ................. MIT          (section 2)
-    DirectML.dll .................... MIT          (section 3, only for the
-                                                    DirectML build)
-    cudart64_*.dll, cublas*.dll,
-    cudnn64_*.dll, ... .............. NVIDIA EULA  (section 4 — READ THIS, it is
-                                                    NOT an open-source licence)
-
-And outside the bundle, under %ProgramData%\AiBgRemover\models\:
-
-    BiRefNet / small-matte weights .. per-model     (section 5)
-
-Sections 2 to 5 are included now so that the obligations are known before the
-files are added, not after.
-
+Sections 3 and 4 describe possible future providers, not the current build.
 
 ================================================================================
 1. OpenFX SDK — BSD 3-Clause — BUILD-TIME ONLY, NOT REDISTRIBUTED
@@ -83,7 +71,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 
 ================================================================================
-2. ONNX Runtime — MIT — WILL BE REDISTRIBUTED (Phase 3)
+2. ONNX Runtime — MIT — HEADER VENDORED; DLL DOWNLOADED SEPARATELY
 ================================================================================
 
 Used for: local AI inference. Loaded at RUN TIME through LoadLibraryW and the
@@ -183,9 +171,11 @@ Until then the CUDA path is a local-build option, not a redistributable one.
 5. MODEL WEIGHTS — LICENCE VARIES PER MODEL — NOTHING SHIPPED YET
 ================================================================================
 
-No model file is redistributed by this project at this time. Models are placed by
-the user under %ProgramData%\AiBgRemover\models\, which keeps them out of
-Program Files and out of the bundle.
+No model file is redistributed by this project. The optional setup script downloads
+rembg's U2NetP ONNX into the user's checkout under models\u2netp.onnx. The
+U-2-Net source code uses Apache-2.0, but the terms for these particular exported
+weights have not been independently confirmed; verify before redistribution or
+commercial use. A SHA-256 match verifies the download, not its license.
 
 What has been established about the candidates, and what has not:
 
@@ -202,9 +192,9 @@ What has been established about the candidates, and what has not:
                           not fit an automatic background remover.
     U^2-Net / IS-Net .... Apache-2.0 code; weight licence unconfirmed.
 
-Rule adopted: a model is only offered in the inspector once its weight licence has
-been read from the checkpoint's own metadata, not inferred from the repository
-README. MODNet is the concrete example of why — the two disagree.
+The U2NetP model is offered for this user-supplied local setup despite the
+unresolved weights license; it is not bundled or claimed cleared for distribution.
+MODNet illustrates why weight terms must not be inferred from code licensing.
 
 
 ================================================================================

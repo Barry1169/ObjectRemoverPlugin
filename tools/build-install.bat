@@ -94,7 +94,8 @@ cmake -S "%REPO_ROOT%" -B "%REPO_ROOT%\build" -G "%GENERATOR%" -A x64 ^
       -DOPENFX_SDK_DIR="%OPENFX_SDK_DIR%" ^
       -DBUILD_TESTS=ON ^
       -DOFX_STATIC_CRT=ON ^
-      -DOFX_DEFAULT_LOG_LEVEL=Info
+      -DOFX_DEFAULT_LOG_LEVEL=Info ^
+      -DAIBGR_WORK_DIR="%REPO_ROOT%"
 if errorlevel 1 (
     echo.
     echo CONFIGURE FAILED. If the error mentions the generator name, list what CMake
@@ -246,17 +247,13 @@ if exist "%RESOLVE_SUPPORT%\OFXPluginCacheV2.xml" (
     ren "%RESOLVE_SUPPORT%\OFXPluginCacheV2.xml" "OFXPluginCacheV2.xml.old" 2>nul
 )
 
-REM Allow ordinary Windows users to write ONLY the log file, not the plugin binary or folder.
-REM If creation/ACL setup fails, the plugin automatically falls back to ProgramData or LocalAppData.
-set "INSTALLED_LOG=%OFX_PLUGINS_DIR%\%BUNDLE_NAME%\Contents\Win64\log.txt"
-if not exist "%INSTALLED_LOG%" type nul > "%INSTALLED_LOG%"
-icacls "%INSTALLED_LOG%" /grant "*S-1-5-32-545:(W)" >nul 2>&1
-if errorlevel 1 echo WARNING: Could not grant write access to the plugin log; a fallback may be used.
+REM The requested workspace is normally writable by the user running Resolve.
+set "INSTALLED_LOG=%REPO_ROOT%\log.txt"
 
 echo.
 echo ==================================================================
 echo  INSTALLED:  %OFX_PLUGINS_DIR%\%BUNDLE_NAME%
-echo  LOG FILE:   %INSTALLED_LOG%
+echo  PREFERRED LOG: %INSTALLED_LOG%
 echo  FALLBACK:   %PLUGIN_DATA%\log.txt or %%LOCALAPPDATA%%\AiBgRemover\log.txt
 echo.
 echo  Now start DaVinci Resolve and:

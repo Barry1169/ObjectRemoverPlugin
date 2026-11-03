@@ -11,6 +11,7 @@
 
 #include "core/Pipeline.h"
 #include "core/PipelineSettings.h"
+#include "inference/U2NetSegmenter.h"
 #include "plugin/OfxImageAdapter.h"
 #include "util/Status.h"
 
@@ -104,6 +105,8 @@ private:
     /// swallowed into a pass-through. Off in shipping builds, on for bring-up.
     std::atomic<bool> failLoudly_{false};
     std::unique_ptr<Pipeline> pipeline_;
+    std::unique_ptr<U2NetSegmenter> aiSegmenter_;
+    bool aiLoadAttempted_ = false;
     OfxAbortChecker abortChecker_;
 
     /// Clip handles and their property sets, fetched once per instance. The handles stay valid for

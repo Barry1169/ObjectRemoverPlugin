@@ -280,10 +280,9 @@ Result defineParameters(OfxParamSetHandle paramSet, const std::vector<ModelChoic
                  "Invert (Remove Subject): remove the subject and keep the background.",
                  pname::kGroupRemoval, processingModeOptions(), 0);
 
-    defineChoice(d, pname::kQuality, "Segmentation Quality",
-                 "The resolution the segmentation runs at, on the long edge. Higher is more "
-                 "accurate on fine detail but costs VRAM and time. On a 4 GB GPU, Balanced (512) "
-                 "is the recommended starting point; Maximum (1024) is intended for stills.",
+    defineChoice(d, pname::kQuality, "Pipeline Resolution (AI fixed at 320)",
+                 "Resolution used before the matte stage. U2NetP always runs at 320 by 320 on CPU; "
+                 "this setting does not change the model input size.",
                  pname::kGroupRemoval, qualityOptions(), 2);
 
     defineChoice(d, pname::kInputColorSpace, "Input Color Space",
@@ -329,30 +328,27 @@ Result defineParameters(OfxParamSetHandle paramSet, const std::vector<ModelChoic
         if (h.valid()) {
             const Props& p = h;
             p.setStringN(kOfxParamPropChoiceOption, modelLabels);
-            p.setString(kOfxParamPropDefault, 0, kFallbackValue);
+            p.setStringN(kOfxParamPropChoiceEnum, modelValues);
+            p.setString(kOfxParamPropDefault, 0, models.empty() ? kFallbackValue : modelValues[1]);
         }
     } else
 #endif
     {
         setModelUsesStrChoice(false);
-        AIBGR_LOGI("StrChoice unavailable (host does not advertise it, or this OpenFX SDK "
-                   "predates OFX 1.5); Model Selection uses an index Choice. Adding or removing "
-                   "a model file may re-point saved projects.");
+        AIBGR_LOGI("StrChoice unavailable; Model Selection uses fixed indices (0=key, 1=U2NetP)");
         defineChoice(d, pname::kModel, "Model Selection",
                      "Which segmentation model to run. The list is built from the models actually "
-                     "present on disk. NOTE: this host stores choices by index, so adding or "
-                     "removing a model file between sessions can re-point a saved project.",
-                     pname::kGroupRemoval, modelLabels, 0);
+                     "present on disk. Existing colour-key choices remain at index zero.",
+                     pname::kGroupRemoval, modelLabels, models.empty() ? 0 : 1);
     }
 
-    // The current algorithm is a simple border-colour key, not AI segmentation. Keep its
-    // controls prominent rather than hiding the only useful adjustments under Diagnostics.
+    // These controls apply to the colour-key fallback only, not to the AI model.
     defineDouble(d, pname::kFallbackKeyTolerance, "Background Colour Tolerance",
                  "Controls how close a pixel must be to the estimated border colour to be removed. "
-                 "Higher removes more similar colours; lower preserves more.",
+                 "Higher removes more similar colours; lower preserves more. Colour key only, not AI.",
                  pname::kGroupRemoval, 0.25, 0.0, 1.0, 0.0, 1.0);
     defineDouble(d, pname::kFallbackKeySoftness, "Background Colour Softness",
-                 "Softens the colour-key transition. This is not AI edge refinement.",
+                 "Softens the colour-key transition; only affects the built-in colour key.",
                  pname::kGroupRemoval, 0.08, 0.0, 1.0, 0.0, 1.0);
 
     // --- Tab 2: Matte Refinement ------------------------------------------
@@ -423,44 +419,40 @@ Result defineParameters(OfxParamSetHandle paramSet, const std::vector<ModelChoic
                  "at the frame's own resolution and is expensive.",
                  pname::kGroupPerf, processingResolutionOptions(), 0);
 
-    defineChoice(d, pname::kGpuAcceleration, "GPU Acceleration",
-                 "Auto probes CUDA, then DirectML, then CPU, and reports what it picked under "
-                 "Diagnostics. Whichever is chosen depends on which onnxruntime.dll is installed "
-                 "next to the plugin - the same .ofx works with any of them.",
+    defineChoice(d, pname::kGpuAcceleration, "GPU Acceleration (not implemented yet)",
+                 "Not implemented yet. U2NetP currently runs on CPU regardless of this setting.",
                  pname::kGroupPerf, gpuBackendOptions(), 0);
 
-    defineInt(d, pname::kGpuDeviceId, "GPU Device", "Adapter index, for multi-GPU machines.",
+    defineInt(d, pname::kGpuDeviceId, "GPU Device (not implemented yet)", "Adapter index, for multi-GPU machines.",
               pname::kGroupPerf, 0, 0, 7);
 
-    defineInt(d, pname::kGpuMemoryLimit, "GPU Memory Limit (MB)",
+    defineInt(d, pname::kGpuMemoryLimit, "GPU Memory Limit (not implemented yet)",
               "Hard cap on the inference arena. On a 4 GB card that is also driving the desktop "
               "and the host, 2048 is a sensible cap. 0 means no cap.",
               pname::kGroupPerf, 2048, 0, 65536);
 
-    defineInt(d, pname::kMaxConcurrentInference, "Max Concurrent Inferences",
+    defineInt(d, pname::kMaxConcurrentInference, "Max Concurrent Inferences (not implemented yet)",
               "How many frames may run the model at once. Above 1 needs VRAM you probably do not "
               "have on a 4 GB card.",
               pname::kGroupPerf, 1, 1, 4);
 
-    defineBool(d, pname::kEnableMatteCache, "Enable Matte Cache",
+    defineBool(d, pname::kEnableMatteCache, "Enable Matte Cache (not implemented yet)",
                "Caches raw mattes so scrubbing the refinement controls does not re-run the model.",
                pname::kGroupPerf, true);
 
-    defineInt(d, pname::kCacheSizeMB, "Matte Cache Size (MB)", "Memory budget for the matte cache.",
+    defineInt(d, pname::kCacheSizeMB, "Matte Cache Size (not implemented yet)", "Memory budget for the matte cache.",
               pname::kGroupPerf, 512, 0, 8192);
 
-    defineInt(d, pname::kThreads, "CPU Threads",
+    defineInt(d, pname::kThreads, "CPU Threads (not implemented yet)",
               "Intra-op thread count for the CPU execution provider. 0 lets the runtime choose.",
               pname::kGroupPerf, 0, 0, 64);
 
-    defineButton(d, pname::kPreloadModel, "Preload Model",
-                 "Loads the model now instead of on the first rendered frame, so the first frame "
-                 "is not slow.",
+    defineButton(d, pname::kPreloadModel, "Retry AI Load",
+                 "Retry loading the AI runtime and model on the next render after an earlier error.",
                  pname::kGroupPerf);
 
     defineButton(d, pname::kClearCache, "Clear Cache",
-                 "Drops cached mattes and releases the loaded model, returning VRAM to the host "
-                 "immediately.",
+                 "Releases reusable image buffers. The AI session stays loaded.",
                  pname::kGroupPerf);
 
     // --- Tab 5: Temporal (Video) --------------------------------------------
@@ -494,14 +486,14 @@ Result defineParameters(OfxParamSetHandle paramSet, const std::vector<ModelChoic
                  pname::kGroupDiag, logLevelOptions(), 2);
 
     defineReadOnlyString(d, pname::kStatusText, "Status",
-                         "This build has no AI backend. See the log for per-frame diagnostics.",
-                         pname::kGroupDiag, "No AI backend; built-in colour key only");
+                         "See the log for model loading and per-frame diagnostics.",
+                         pname::kGroupDiag, "See log for AI status (CPU only)");
 
     defineReadOnlyString(d, pname::kLogPath, "Log File",
                          "Log path selected on plugin load. If unavailable, see the ProgramData or local cache log.",
                          pname::kGroupDiag, defaultLogPath());
 
-    defineBool(d, pname::kFailLoudly, "Fail Loudly If Model Missing",
+    defineBool(d, pname::kFailLoudly, "Fail Loudly If Model Missing (not implemented yet)",
                "Development aid. Off (the default) means a missing model or runtime degrades to "
                "the built-in fallback and logs why. On means the node reports a hard failure so "
                "the problem is impossible to miss.",

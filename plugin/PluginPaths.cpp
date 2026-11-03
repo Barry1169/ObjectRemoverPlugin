@@ -23,6 +23,21 @@ std::string modelsDir() {
     return d.empty() ? std::string() : joinPath(d, "models");
 }
 
+std::string workspaceDir() { return AIBGR_WORK_DIR; }
+std::string aiModelPath() {
+    const std::string dir = workspaceDir();
+    return dir.empty() ? std::string() : joinPath(joinPath(dir, "models"), "u2netp.onnx");
+}
+std::string aiRuntimePath() {
+    const std::string dir = workspaceDir();
+    if (dir.empty()) return {};
+#if defined(_WIN32)
+    return joinPath(joinPath(dir, "runtime"), "onnxruntime.dll");
+#else
+    return joinPath(joinPath(dir, "runtime"), "libonnxruntime.so");
+#endif
+}
+
 namespace {
 bool canAppend(const std::string& path) {
     if (path.empty()) return false;
@@ -45,7 +60,7 @@ std::string selectWritableLogPath(const std::string& preferred, const std::strin
 }
 
 std::string preferredLogPath() {
-    const std::string dir = moduleDir();
+    const std::string dir = workspaceDir();
     return dir.empty() ? std::string() : joinPath(dir, "log.txt");
 }
 
@@ -64,7 +79,7 @@ std::string configurePluginLog() {
     }
     Log::instance().setFilePath(selected);
     if (!selected.empty() && selected != preferred) {
-        AIBGR_LOGI("plugin directory log unavailable; using fallback log: %s", selected.c_str());
+        AIBGR_LOGI("workspace log unavailable; using fallback log: %s", selected.c_str());
     }
     return selected;
 }

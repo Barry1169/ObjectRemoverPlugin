@@ -15,6 +15,7 @@
 #include "plugin/ParamValues.h"
 #include "plugin/PluginPaths.h"
 #include "util/Log.h"
+#include "util/Paths.h"
 
 namespace aibgr {
 namespace ofx {
@@ -187,10 +188,10 @@ void PluginInstance::resetTemporalState() {
 }
 
 void PluginInstance::preloadModel() {
-    // Phase 3 owns the model manager. Until it exists there is nothing to warm, and claiming
-    // otherwise in the status line would be a lie.
-    AIBGR_LOGI("Preload Model pressed on instance %p; no model backend is linked yet",
-               static_cast<const void*>(effect_));
+    // Defer external library initialization until the next render.
+    std::lock_guard<std::mutex> lock(scratchMutex_);
+    aiLoadAttempted_ = false;
+    AIBGR_LOGI("AI load retry requested; next render will initialize the model");
 }
 
 void PluginInstance::instanceChanged(const char* paramName, double time) {
@@ -406,6 +407,19 @@ Result PluginInstance::render(double time, OfxPropertySetHandle inArgs) {
         if (!read.ok()) {
             outcome = read;
         } else {
+            const bool useAi = settings.model == ModelId::SmallMatte && !isPassThrough(settings) && !ctx.thumbnailRender;
+            if (useAi && !aiSegmenter_ && !aiLoadAttempted_) {
+                aiLoadAttempted_ = true;
+                auto candidate = std::make_unique<U2NetSegmenter>();
+                const Result loaded = candidate->open(aiRuntimePath(), aiModelPath());
+                if (loaded.ok()) {
+                    aiSegmenter_ = std::move(candidate);
+                    AIBGR_LOGI("AI loaded: U2NetP CPU (320x320), model=%s", aiModelPath().c_str());
+                } else {
+                    AIBGR_LOGE("AI unavailable: %s; using colour key", loaded.toString().c_str());
+                }
+            }
+            pipeline_->setMatteSource(useAi ? aiSegmenter_.get() : nullptr);
             const Result proc = pipeline_->process(ctx, settings, srcFloat_, dstFloat_, lastStats_);
             if (!proc.ok()) {
                 // D9: never fail a render over a content problem. Pass the source through so the
@@ -471,16 +485,13 @@ Result PluginInstance::render(double time, OfxPropertySetHandle inArgs) {
 
 namespace {
 
-/// The models actually available to this build.
-///
-/// Deliberately empty in Phase 2. Phase 3 replaces this with a real catalogue scan of
-/// <pluginDataDir>/models plus a tensor-signature check, because listing a model we cannot run is
-/// worse than listing none: the artist picks it and gets a silent pass-through. Until then the
-/// Model Selection parameter offers only the built-in colour key, which is exactly what the plugin
-/// can honestly do.
+/// Advertise only our supported model, preserving fallback at index zero for saved projects.
 std::vector<ModelChoice> discoverModelChoices() {
-    AIBGR_LOGI("model catalogue is empty (AI backend lands in Phase 3); offering the built-in "
-               "colour key only");
+    if (fileExists(aiModelPath()) && fileExists(aiRuntimePath())) {
+        AIBGR_LOGI("U2NetP model and CPU runtime found; offering AI segmentation");
+        return {{"u2netp", "U2NetP (AI, CPU)"}};
+    }
+    AIBGR_LOGI("AI runtime/model not found; offering built-in colour key only");
     return {};
 }
 

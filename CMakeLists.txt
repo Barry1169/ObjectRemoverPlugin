@@ -28,6 +28,17 @@ set(OPENFX_SDK_DIR
     ""
     CACHE PATH "Root of the OpenFX SDK checkout (the folder containing include/)")
 
+if(WIN32)
+  set(_aibgr_work_default "D:/AI-Effects/ObjectRemoverPlugin-Fix")
+else()
+  set(_aibgr_work_default "")
+endif()
+set(AIBGR_WORK_DIR "${_aibgr_work_default}" CACHE PATH "Workspace directory for AI assets and log.txt")
+file(TO_CMAKE_PATH "${AIBGR_WORK_DIR}" AIBGR_WORK_DIR_NORMALIZED)
+if(AIBGR_WORK_DIR_NORMALIZED MATCHES "[\"\n\r]")
+  message(FATAL_ERROR "AIBGR_WORK_DIR contains unsupported characters")
+endif()
+
 set(OFX_CXX_STANDARD
     20
     CACHE STRING "C++ standard to build with (17 or 20). The code is valid under both.")
@@ -156,6 +167,7 @@ add_library(aibgr_core STATIC
   matte/Matte.cpp
   matte/Resize.cpp
   matte/PlaceholderMatte.cpp
+  inference/U2NetSegmenter.cpp
   composite/Compositor.cpp
 )
 target_include_directories(aibgr_core
@@ -163,6 +175,8 @@ target_include_directories(aibgr_core
          "${CMAKE_CURRENT_BINARY_DIR}/generated"
 )
 target_compile_features(aibgr_core PUBLIC cxx_std_${OFX_CXX_STANDARD})
+target_include_directories(aibgr_core PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/third_party/onnxruntime/include")
+target_link_libraries(aibgr_core PUBLIC ${CMAKE_DL_LIBS})
 set_target_properties(aibgr_core PROPERTIES CXX_VISIBILITY_PRESET hidden
                                             VISIBILITY_INLINES_HIDDEN ON)
 
@@ -255,6 +269,7 @@ if(BUILD_TESTS)
     tests/test_placeholder_matte.cpp
     tests/test_pipeline.cpp
     tests/test_pipeline_settings.cpp
+    tests/test_u2net.cpp
   )
   target_link_libraries(aibgr_tests PRIVATE aibgr_core)
   target_include_directories(aibgr_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/tests")

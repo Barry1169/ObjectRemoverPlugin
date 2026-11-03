@@ -126,7 +126,7 @@ ModelId modelIdFromValue(const std::string& value) noexcept {
     if (value == "birefnet-portrait") {
         return ModelId::BirefNetPortrait;
     }
-    if (value == "small-matte") {
+    if (value == "small-matte" || value == "u2netp") {
         return ModelId::SmallMatte;
     }
     if (value == "vitmatte") {
@@ -140,7 +140,7 @@ const char* modelValueFromId(ModelId id) noexcept {
     case ModelId::BirefNetLite: return "birefnet-lite";
     case ModelId::BirefNetGeneral: return "birefnet-general";
     case ModelId::BirefNetPortrait: return "birefnet-portrait";
-    case ModelId::SmallMatte: return "small-matte";
+    case ModelId::SmallMatte: return "u2netp";
     case ModelId::ViTMatte: return "vitmatte";
     case ModelId::Auto: return "auto";
     case ModelId::None: break;
@@ -222,14 +222,9 @@ Result readSettings(OfxParamSetHandle paramSet, double time, PipelineSettings& o
     } else {
         int index = 0;
         wantInt(pname::kModel, index);
-        // Index 0 is always the built-in fallback key (see defineParameters()). Indices above 0
-        // would map into the discovered catalogue, but no catalogue exists until Phase 3, so every
-        // index means "no AI model" here. Reporting None is honest; guessing a model would not be.
-        out.model = ModelId::None;
-        if (index > 0) {
-            modelNote = "requested model index " + std::to_string(index) +
-                        " but no model catalogue is loaded yet";
-        }
+        // Stable ordering: 0 = colour key, 1 = U2NetP. Existing projects at 0 stay unchanged.
+        out.model = index == 1 ? ModelId::SmallMatte : ModelId::None;
+        if (index > 1) modelNote = "unknown model selection index " + std::to_string(index);
     }
 
     wantDouble(pname::kDetailRefinement, out.detailRefinement);

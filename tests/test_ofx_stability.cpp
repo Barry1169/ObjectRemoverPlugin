@@ -7,6 +7,7 @@
 #include "plugin/ParamValues.h"
 #include "plugin/PluginPaths.h"
 #include "util/Log.h"
+#include "util/Paths.h"
 
 #include <atomic>
 #include <cstring>
@@ -43,6 +44,7 @@ OfxPropertySetHandle handle(Properties& p) { return reinterpret_cast<OfxProperty
 
 struct FakeHost {
     Properties hostProps, effectProps, args, sourceImage, outputImage;
+    std::map<std::string, Properties> definitions;
     OfxPropertySuiteV1 props{};
     OfxImageEffectSuiteV1 fx{};
     OfxParameterSuiteV1 params{};
@@ -53,6 +55,8 @@ struct FakeHost {
     int paramWrites = 0, recursionDepth = 0;
     bool sourceAvailable = true;
     double tolerance = 0.25, softness = 0.08;
+    int modelIndex = 0;
+    std::string modelValue = "__fallback__";
     OfxImageEffectHandle effect() { return reinterpret_cast<OfxImageEffectHandle>(&effectToken); }
     OfxParamSetHandle paramSet() { return reinterpret_cast<OfxParamSetHandle>(&paramToken); }
     OfxImageClipHandle src() { return reinterpret_cast<OfxImageClipHandle>(&srcToken); }
@@ -71,11 +75,22 @@ const void* fetch(OfxPropertySetHandle, const char* name, int version) {
 OfxStatus getParameterAtTime(OfxParamHandle p, OfxTime time, ...) {
     const char* name = reinterpret_cast<const char*>(p);
     if (std::strcmp(name, pname::kFallbackKeyTolerance) != 0 &&
-        std::strcmp(name, pname::kFallbackKeySoftness) != 0) return kOfxStatErrUnknown;
+        std::strcmp(name, pname::kFallbackKeySoftness) != 0 &&
+        std::strcmp(name, pname::kModel) != 0) return kOfxStatErrUnknown;
     va_list args;
     va_start(args, time);
-    double* result = va_arg(args, double*);
-    *result = std::strcmp(name, pname::kFallbackKeyTolerance) == 0 ? current->tolerance : current->softness;
+    if (std::strcmp(name, pname::kModel) == 0) {
+        if (modelUsesStrChoice()) {
+            char** result = va_arg(args, char**);
+            *result = const_cast<char*>(current->modelValue.c_str());
+        } else {
+            int* result = va_arg(args, int*);
+            *result = current->modelIndex;
+        }
+    } else {
+        double* result = va_arg(args, double*);
+        *result = std::strcmp(name, pname::kFallbackKeyTolerance) == 0 ? current->tolerance : current->softness;
+    }
     va_end(args);
     return kOfxStatOK;
 }
@@ -93,6 +108,9 @@ FakeHost::FakeHost() {
     current = this;
     props.propSetString = [](OfxPropertySetHandle p, const char* k, int i, const char* v) -> OfxStatus { put(properties(p).strings, k, i, std::string(v)); return kOfxStatOK; };
     props.propSetInt = [](OfxPropertySetHandle p, const char* k, int i, int v) -> OfxStatus { put(properties(p).ints, k, i, v); return kOfxStatOK; };
+    props.propSetStringN = [](OfxPropertySetHandle p, const char* k, int n, const char* const* v) -> OfxStatus { for (int i=0; i<n; ++i) put(properties(p).strings, k, i, std::string(v[i])); return kOfxStatOK; };
+    props.propSetDouble = [](OfxPropertySetHandle p, const char* k, int i, double v) -> OfxStatus { put(properties(p).doubles, k, i, v); return kOfxStatOK; };
+    props.propSetDoubleN = [](OfxPropertySetHandle p, const char* k, int n, const double* v) -> OfxStatus { for (int i=0; i<n; ++i) put(properties(p).doubles, k, i, v[i]); return kOfxStatOK; };
     props.propGetString = [](OfxPropertySetHandle p, const char* k, int i, char** v) -> OfxStatus {
         auto it = properties(p).strings.find(k);
         if (it == properties(p).strings.end() || i < 0 || static_cast<int>(it->second.size()) <= i) return kOfxStatErrUnknown;
@@ -129,12 +147,13 @@ FakeHost::FakeHost() {
     };
     fx.clipReleaseImage = [](OfxPropertySetHandle) -> OfxStatus { return kOfxStatOK; };
     fx.abort = [](OfxImageEffectHandle) -> int { return 0; };
+    params.paramDefine = [](OfxParamSetHandle, const char*, const char* name, OfxPropertySetHandle* out) -> OfxStatus { *out = handle(current->definitions[name]); return kOfxStatOK; };
     params.paramGetHandle = [](OfxParamSetHandle, const char* name, OfxParamHandle* out, OfxPropertySetHandle*) -> OfxStatus {
         if (std::strcmp(name, pname::kStatusText) && std::strcmp(name, pname::kLogPath) &&
             std::strcmp(name, pname::kDetailRefinement) && std::strcmp(name, pname::kEdgeFeather) &&
             std::strcmp(name, pname::kEdgeExpansion) && std::strcmp(name, pname::kEdgeSmoothing) &&
             std::strcmp(name, pname::kShiftMatte) && std::strcmp(name, pname::kFallbackKeyTolerance) &&
-            std::strcmp(name, pname::kFallbackKeySoftness)) return kOfxStatErrUnknown;
+            std::strcmp(name, pname::kFallbackKeySoftness) && std::strcmp(name, pname::kModel)) return kOfxStatErrUnknown;
         *out = reinterpret_cast<OfxParamHandle>(const_cast<char*>(name)); return kOfxStatOK;
     };
     params.paramGetValueAtTime = getParameterAtTime;
@@ -274,3 +293,38 @@ TEST(ofxStability, choosesWritableLogAndFallsBackWithoutTruncating) {
     CHECK(selectWritableLogPath(unavailable, (dir / "missing2" / "log.txt").string()).empty());
     fs::remove_all(dir);
 }
+
+TEST(ofxStability, realModelCanBeSelectedWhenAssetsSupplied) {
+    if (!std::getenv("AIBGR_TEST_MODEL") || !aibgr::fileExists(aiRuntimePath()) || !aibgr::fileExists(aiModelPath())) return;
+    FakeHost host;
+    setModelUsesStrChoice(false);
+    host.modelIndex = 1;
+    CHECK_EQ(pluginMain(kOfxActionCreateInstance, host.effect(), nullptr, nullptr), kOfxStatOK);
+    CHECK_EQ(pluginMain(kOfxImageEffectActionRender, host.effect(), handle(host.args), nullptr), kOfxStatOK);
+    PluginInstance* instance = findInstance(host.effect());
+    CHECK(instance != nullptr);
+    if (instance) {
+        CHECK(instance->pipeline().matteSource() != nullptr);
+        if (instance->pipeline().matteSource()) CHECK_EQ(std::string(instance->pipeline().matteSource()->name()), std::string("U2NetP CPU"));
+    }
+    CHECK_EQ(pluginMain(kOfxActionDestroyInstance, host.effect(), nullptr, nullptr), kOfxStatOK);
+}
+
+#if defined(kOfxParamTypeStrChoice)
+TEST(ofxStability, strChoiceHasStableModelValues) {
+    FakeHost host;
+    put(host.hostProps.ints, kOfxParamHostPropSupportsStrChoice, 0, 1);
+    CHECK(HostBridge::instance().acquireSuites().ok());
+    CHECK(defineParameters(host.paramSet(), {{"u2netp", "U2NetP (AI, CPU)"}}).ok());
+    const auto& p = host.definitions[pname::kModel].strings;
+    CHECK_EQ(p.at(kOfxParamPropChoiceEnum)[0], std::string("__fallback__"));
+    CHECK_EQ(p.at(kOfxParamPropChoiceEnum)[1], std::string("u2netp"));
+    CHECK_EQ(p.at(kOfxParamPropDefault)[0], std::string("u2netp"));
+    host.modelValue = "u2netp";
+    aibgr::PipelineSettings settings;
+    std::string note;
+    CHECK(readSettings(host.paramSet(), 0.0, settings, note).ok());
+    CHECK(settings.model == aibgr::ModelId::SmallMatte);
+    setModelUsesStrChoice(false);
+}
+#endif
