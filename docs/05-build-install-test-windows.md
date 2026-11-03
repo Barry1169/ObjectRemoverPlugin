@@ -378,20 +378,29 @@ Save results into `docs/test-results/phaseN.md` — a real record, not a claim.
    this plugin silently" (docs/03, D10). The project guards against this class of failure with its
    own export macro instead of the SDK's `OfxExport` — see "Which version of the OpenFX SDK you
    have" in §2 for why.
-2. **`.ofx` is a renamed DLL** — the CMake target must set `SUFFIX ".ofx"` and `PREFIX ""`, or Resolve
+2. **`LNK2038: mismatch detected for RuntimeLibrary`** → one target was compiled `/MT` and another
+   `/MD`. MSVC stamps the runtime choice into every object file and refuses to link a mix.
+   `MSVC_RUNTIME_LIBRARY` is a **per-target** property whose default is `/MD`, so setting it on the
+   plugin and the core library still leaves every other target — the test executable, and anything
+   added later — silently on `/MD`. This project sets `CMAKE_MSVC_RUNTIME_LIBRARY` **once, before any
+   target is created** (it is read at target-creation time and is not retroactive), and asserts at
+   configure time that every target resolved to the same value. Do not reintroduce a per-target
+   `set_property`. If the error appears after pulling this fix, the build directory still holds
+   objects compiled under the old flags — delete it and re-run.
+3. **`.ofx` is a renamed DLL** — the CMake target must set `SUFFIX ".ofx"` and `PREFIX ""`, or Resolve
    will not find it.
-3. **Bundle layout** must be `<Name>.ofx.bundle/Contents/Win64/<Name>.ofx`. A loose `.ofx` is ignored.
-4. **`onnxruntime.dll` not next to the `.ofx`** → Windows will not search `Program Files\Common Files`
+4. **Bundle layout** must be `<Name>.ofx.bundle/Contents/Win64/<Name>.ofx`. A loose `.ofx` is ignored.
+5. **`onnxruntime.dll` not next to the `.ofx`** → Windows will not search `Program Files\Common Files`
    by default; the plugin adds its own directory to the DLL search path, but keep the DLL adjacent.
-5. **CUDA DLL search inside Resolve** — Resolve's process `PATH` will not include your CUDA folders.
+6. **CUDA DLL search inside Resolve** — Resolve's process `PATH` will not include your CUDA folders.
    The plugin must `AddDllDirectory`/preload from its own folder. This is a known trap and is handled
    in `util/win/Paths`.
-6. **4 GB VRAM shared with the desktop and Resolve** — cap ORT's arena. Do not set
+7. **4 GB VRAM shared with the desktop and Resolve** — cap ORT's arena. Do not set
    `maxConcurrentInference` above 1.
-7. **Antivirus / SmartScreen** on an unsigned DLL in `Program Files` can silently block the load.
+8. **Antivirus / SmartScreen** on an unsigned DLL in `Program Files` can silently block the load.
    Code-signing is out of scope here but worth knowing.
-8. **Resolve auto-disables a plugin that crashed at startup** and records it in
+9. **Resolve auto-disables a plugin that crashed at startup** and records it in
    `OFXPluginCacheV2.xml`. After any crash, check that file.
-9. **`Half` bit depth** — do not assume `kOfxBitDepthHalf` never arrives. Resolve does use it.
-10. **Premultiplication differs by page/context** (V14). The `premultiplyOutput` escape hatch exists
+10. **`Half` bit depth** — do not assume `kOfxBitDepthHalf` never arrives. Resolve does use it.
+11. **Premultiplication differs by page/context** (V14). The `premultiplyOutput` escape hatch exists
     for exactly this; use it to diagnose rather than rebuild.

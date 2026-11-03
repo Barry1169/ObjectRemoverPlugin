@@ -112,6 +112,13 @@ echo [2/5] Building ...
 cmake --build "%REPO_ROOT%\build" --config %CONFIG% --parallel
 if errorlevel 1 (
     echo BUILD FAILED.
+    echo.
+    echo   If the error is LNK2038 ^(RuntimeLibrary mismatch^), this build directory still
+    echo   holds object files compiled before the MSVC runtime was set project-wide, and
+    echo   MSBuild relinked them instead of recompiling. Delete it and re-run:
+    echo.
+    echo       rmdir /s /q "%REPO_ROOT%\build"
+    echo       tools\build-install.bat
     exit /b 1
 )
 

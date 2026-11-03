@@ -64,6 +64,36 @@ set_property(CACHE OFX_DEFAULT_LOG_LEVEL PROPERTY STRINGS Off Error Info Verbose
 option(OFX_STATIC_CRT
        "MSVC: link the C runtime statically so the .ofx depends only on KERNEL32.dll" ON)
 
+# ---------------------------------------------------------------------------
+# MSVC runtime, set once for the whole project.
+#
+# This MUST be set before any target is created: CMAKE_MSVC_RUNTIME_LIBRARY is read at
+# target-creation time and is not retroactive. Requires policy CMP0091 NEW, which
+# cmake_minimum_required(3.20) gives us.
+#
+# The default for a new target is MultiThreaded$<$<CONFIG:Debug>:Debug>DLL, i.e. /MD. Setting the
+# runtime per target therefore means every target has to remember to opt in, and the first one that
+# forgets fails at link time rather than at configure time. That is exactly what happened to
+# aibgr_tests: it links aibgr_core, and MSVC embeds the runtime choice in each object file and
+# refuses to mix them -
+#
+#   LNK2038: mismatch detected for RuntimeLibrary:
+#            aibgr_core.lib(...): MT_StaticRelease
+#            TestMain.obj:        MD_DynamicRelease
+#
+# A single project-wide value makes the mismatch unrepresentable. OFX_STATIC_CRT=ON keeps the .ofx
+# and the static core library at /MT (Release) and /MTd (Debug) so the plugin depends only on
+# KERNEL32.dll and needs no VC++ redistributable on the target machine; the test executable has to
+# match the library it links, so it follows the same value rather than being set separately.
+# ---------------------------------------------------------------------------
+if(MSVC)
+  if(OFX_STATIC_CRT)
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+  else()
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
+  endif()
+endif()
+
 set(OFX_INSTALL_BUNDLE_ROOT
     ""
     CACHE
@@ -182,14 +212,8 @@ if(MSVC)
   target_compile_options(${OFX_PLUGIN_NAME} PRIVATE /W4 /permissive- /Zc:__cplusplus /EHsc
                                                     /wd4100 /wd4127)
   target_compile_definitions(${OFX_PLUGIN_NAME} PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
-  # Per the tested route in the supplied guide: static CRT so the .ofx does not depend on
-  # VCRUNTIME140*.dll. Requires CMake >= 3.15 policy CMP0091 (we ask for 3.20).
-  if(OFX_STATIC_CRT)
-    set_property(TARGET ${OFX_PLUGIN_NAME} PROPERTY
-      MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
-    set_property(TARGET aibgr_core PROPERTY
-      MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
-  endif()
+  # The static CRT is applied project-wide by CMAKE_MSVC_RUNTIME_LIBRARY near the top of this
+  # file, not per target - see the comment there. Nothing to set here.
   # No unresolved-symbol tolerance: a bad export must fail the build, not the plugin load.
   target_link_options(${OFX_PLUGIN_NAME} PRIVATE /DYNAMICBASE /NXCOMPAT /CETCOMPAT)
 else()
@@ -248,4 +272,25 @@ message(STATUS "   Label / Grouping   : ${OFX_PLUGIN_LABEL} / ${OFX_PLUGIN_GROUP
 message(STATUS "   Bundle output      : ${AIBGR_BUNDLE_STAGING}")
 message(STATUS "   Startup log level  : ${OFX_DEFAULT_LOG_LEVEL}")
 message(STATUS "   Tests              : ${BUILD_TESTS}")
+if(MSVC)
+  message(STATUS "   MSVC runtime       : ${CMAKE_MSVC_RUNTIME_LIBRARY}"
+                 "  (OFX_STATIC_CRT=${OFX_STATIC_CRT})")
+  # Every object file records the runtime it was compiled with and MSVC refuses to link a mix, so
+  # this is checked at configure time rather than discovered at link time. The property is read
+  # back as the literal generator expression, which is what each target will actually compile with.
+  set(_aibgr_rt_targets aibgr_core ${OFX_PLUGIN_NAME})
+  if(BUILD_TESTS)
+    list(APPEND _aibgr_rt_targets aibgr_tests)
+  endif()
+  foreach(_tgt IN LISTS _aibgr_rt_targets)
+    get_target_property(_rt "${_tgt}" MSVC_RUNTIME_LIBRARY)
+    if(NOT _rt STREQUAL CMAKE_MSVC_RUNTIME_LIBRARY)
+      message(FATAL_ERROR
+        "Target '${_tgt}' has MSVC_RUNTIME_LIBRARY='${_rt}' but the project sets "
+        "'${CMAKE_MSVC_RUNTIME_LIBRARY}'. MSVC cannot link objects built against different "
+        "runtimes (LNK2038). Remove the per-target override, or set it to the project value.")
+    endif()
+  endforeach()
+  unset(_aibgr_rt_targets)
+endif()
 message(STATUS "------------------------------------------------------------------")
