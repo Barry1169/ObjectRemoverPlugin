@@ -1,0 +1,50 @@
+# Build trees
+build/
+build-*/
+out/
+cmake-build-*/
+CMakeUserPresets.json
+
+# Staged / installed artifacts
+bundle/
+install/
+*.ofx
+*.ofx.bundle/
+
+# Toolchain droppings
+*.obj
+*.o
+*.a
+*.lib
+*.so
+*.dll
+*.dylib
+*.pdb
+*.ilk
+*.exp
+*.idb
+*.tlog
+*.log
+*.lastbuildstate
+.vs/
+.vscode/
+.idea/
+compile_commands.json
+
+# Models and runtime binaries are large and user-supplied - never commit them.
+models/
+*.onnx
+*.onnx.data
+onnxruntime*.dll
+DirectML.dll
+cudart64*.dll
+cublas*.dll
+cudnn64*.dll
+cufft64*.dll
+curand64*.dll
+nvrtc64*.dll
+
+# Test output
+docs/test-results/
+Testing/
+bench-*.md

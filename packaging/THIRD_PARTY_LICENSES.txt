@@ -1,0 +1,239 @@
+================================================================================
+THIRD-PARTY LICENSES — AI Background Remover (AiBgRemover) OpenFX plugin
+================================================================================
+
+This file ships inside the plugin bundle, next to the .ofx binary:
+
+    AiBgRemover.ofx.bundle/Contents/Win64/THIRD_PARTY_LICENSES.txt
+
+It is written to be accurate rather than exhaustive-by-default. Each component is
+labelled with whether it is actually redistributed in the bundle, because that is
+what determines whether its licence imposes an obligation on you.
+
+--------------------------------------------------------------------------------
+SUMMARY — WHAT IS IN THE BUNDLE
+--------------------------------------------------------------------------------
+
+Phase 2 (current state of this repository):
+
+    AiBgRemover.ofx ................. this project, MIT
+    THIRD_PARTY_LICENSES.txt ........ this file
+
+    Nothing else. No ONNX Runtime, no model weights, no vendor DLLs. The plugin
+    currently offers only its built-in border-colour key.
+
+Phase 3 and later will add, in the same folder:
+
+    onnxruntime.dll ................. MIT          (section 2)
+    DirectML.dll .................... MIT          (section 3, only for the
+                                                    DirectML build)
+    cudart64_*.dll, cublas*.dll,
+    cudnn64_*.dll, ... .............. NVIDIA EULA  (section 4 — READ THIS, it is
+                                                    NOT an open-source licence)
+
+And outside the bundle, under %ProgramData%\AiBgRemover\models\:
+
+    BiRefNet / small-matte weights .. per-model     (section 5)
+
+Sections 2 to 5 are included now so that the obligations are known before the
+files are added, not after.
+
+
+================================================================================
+1. OpenFX SDK — BSD 3-Clause — BUILD-TIME ONLY, NOT REDISTRIBUTED
+================================================================================
+
+Used for: the C headers under include/ (ofxCore.h, ofxImageEffect.h, ofxParam.h,
+ofxProperty.h, ofxMemory.h, ofxMessage.h, ofxMultiThread.h).
+
+Not redistributed. This project deliberately compiles NO source file from the
+SDK's Support/Library; the plugin talks to the host through the raw OFX C API and
+its own helper layer. The headers declare structures and string constants, and
+the resulting binary contains no SDK code. Attribution is included because the
+licence asks for it in spirit and because it costs nothing.
+
+BSD 3-Clause License
+
+Copyright (c) 2025, OpenFX and contributors to the OpenFX project
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright notice, this
+   list of conditions and the following disclaimer.
+
+2. Redistributions in binary form must reproduce the above copyright notice,
+   this list of conditions and the following disclaimer in the documentation
+   and/or other materials provided with the distribution.
+
+3. Neither the name of the copyright holder nor the names of its
+   contributors may be used to endorse or promote products derived from
+   this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+
+================================================================================
+2. ONNX Runtime — MIT — WILL BE REDISTRIBUTED (Phase 3)
+================================================================================
+
+Used for: local AI inference. Loaded at RUN TIME through LoadLibraryW and the
+OrtGetApiBase entry point; the plugin never links onnxruntime.lib. If the DLL is
+absent the plugin degrades to its built-in colour key rather than failing to load.
+
+The MIT licence below is the text ONNX Runtime ships with. Verify it against the
+exact archive you download before shipping, since the copyright year and the list
+of bundled sub-components (protobuf, nsync, Eigen, and so on) change between
+releases and each release carries its own ThirdPartyNotices.txt. THAT file must
+be copied alongside the DLL — this section is not a substitute for it.
+
+    MIT License
+
+    Copyright (c) Microsoft Corporation
+
+    Permission is hereby granted, free of charge, to any person obtaining a copy
+    of this software and associated documentation files (the "Software"), to deal
+    in the Software without restriction, including without limitation the rights
+    to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+    copies of the Software, and to permit persons to whom the Software is
+    furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice shall be included in all
+    copies or substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+    OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+    SOFTWARE.
+
+
+================================================================================
+3. DirectML — MIT — WILL BE REDISTRIBUTED ONLY IN THE DIRECTML BUILD
+================================================================================
+
+Used for: GPU inference on any DX12-capable Windows 10/11 device, with no CUDA
+or cuDNN install. Optional; the CUDA and CPU builds do not ship it.
+
+DirectML is reported to be in maintenance mode, with Microsoft pointing new work
+at WinML. That is a maintenance concern, not a licence concern. Same caveat as
+section 2: copy the archive's own ThirdPartyNotices.txt next to the DLL.
+
+    MIT License
+
+    Copyright (c) Microsoft Corporation
+
+    Permission is hereby granted, free of charge, to any person obtaining a copy
+    of this software and associated documentation files (the "Software"), to deal
+    in the Software without restriction, including without limitation the rights
+    to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+    copies of the Software, and to permit persons to whom the Software is
+    furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice shall be included in all
+    copies or substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+    OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+    SOFTWARE.
+
+
+================================================================================
+4. NVIDIA CUDA RUNTIME AND cuDNN — PROPRIETARY — READ BEFORE SHIPPING
+================================================================================
+
+*** These are NOT open source. Sections 2 and 3 do not apply to them. ***
+
+The CUDA build of ONNX Runtime needs cudart, cublas, cublasLt, cudnn and friends
+on the DLL search path. They are covered by the NVIDIA Software License Agreement
+and the cuDNN Software License Agreement, which permit redistribution only under
+specific conditions — generally that the DLLs come from an NVIDIA redistributable
+package, are unmodified, and are accompanied by NVIDIA's own licence text and
+EULA, which the end user is bound by.
+
+Consequences for this project, all still open:
+
+  * The CUDA redistributables add roughly 1.5-3 GB to the install. That is why
+    DirectML is brought up first even though CUDA is likely faster on an RTX 2050.
+  * Shipping them requires including NVIDIA's EULA in this file or beside it, and
+    a decision about whether the plugin is distributed at all versus built
+    locally by each user.
+  * Nothing in this repository has been checked against the current NVIDIA
+    redistributable terms. Do that before distributing a CUDA-enabled bundle.
+
+Until then the CUDA path is a local-build option, not a redistributable one.
+
+
+================================================================================
+5. MODEL WEIGHTS — LICENCE VARIES PER MODEL — NOTHING SHIPPED YET
+================================================================================
+
+No model file is redistributed by this project at this time. Models are placed by
+the user under %ProgramData%\AiBgRemover\models\, which keeps them out of
+Program Files and out of the bundle.
+
+What has been established about the candidates, and what has not:
+
+    BiRefNet ............ code MIT. Weight licence for the specific published
+                          checkpoint still needs confirming against the file you
+                          actually download.
+    RobustVideoMatting .. GPL-3.0. REJECTED: incompatible with an MIT plugin that
+                          is loaded into a proprietary host.
+    MODNet .............. code Apache-2.0, but a downstream project reports the
+                          published weights as CC BY-NC-SA 4.0, which forbids
+                          commercial use. Unresolved; do not ship until it is.
+    ViTMatte ............ MIT.
+    SAM 2 ............... Apache-2.0, but needs interactive prompts, so it does
+                          not fit an automatic background remover.
+    U^2-Net / IS-Net .... Apache-2.0 code; weight licence unconfirmed.
+
+Rule adopted: a model is only offered in the inspector once its weight licence has
+been read from the checkpoint's own metadata, not inferred from the repository
+README. MODNet is the concrete example of why — the two disagree.
+
+
+================================================================================
+6. THIS PROJECT
+================================================================================
+
+MIT License
+
+Copyright (c) 2026 Hirdesh
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+
+================================================================================
+END OF FILE
+================================================================================
