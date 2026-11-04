@@ -217,6 +217,11 @@ Result Pipeline::process(const FrameContext& ctx, const PipelineSettings& settin
         if (!corrected.ok()) AIBGR_LOGE("guidance mask: %s", corrected.toString().c_str());
     }
 
+    if (brushOverride_) {
+        const Result painted = brushOverride_->apply(*finalMatte, effective.matteInvert);
+        if (!painted.ok()) AIBGR_LOGE("brush correction: %s", painted.toString().c_str());
+    }
+
     // --- 9. Composite ------------------------------------------------------
     {
         ScopeTimer t;

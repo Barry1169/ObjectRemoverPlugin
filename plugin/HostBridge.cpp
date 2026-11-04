@@ -257,6 +257,7 @@ Result HostBridge::acquireSuites() {
     props_ = static_cast<const OfxPropertySuiteV1*>(fetch(kOfxPropertySuite, 1));
     effect_ = static_cast<const OfxImageEffectSuiteV1*>(fetch(kOfxImageEffectSuite, 1));
     params_ = static_cast<const OfxParameterSuiteV1*>(fetch(kOfxParameterSuite, 1));
+    interact_ = static_cast<const OfxInteractSuiteV1*>(host_->fetchSuite(host_->host, kOfxInteractSuite, 1));
     // Optional suites: absence is not fatal.
     memory_ = static_cast<const OfxMemorySuiteV1*>(fetch(kOfxMemorySuite, 1));
     threads_ = static_cast<const OfxMultiThreadSuiteV1*>(fetch(kOfxMultiThreadSuite, 1));

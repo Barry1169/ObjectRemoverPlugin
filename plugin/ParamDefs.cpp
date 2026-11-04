@@ -380,6 +380,23 @@ Result defineParameters(OfxParamSetHandle paramSet, const std::vector<ModelChoic
                  "the model clipped; a small negative value kills a bright fringe.",
                  pname::kGroupRefine, 0.0, -0.5, 0.5, -0.2, 0.2);
 
+    defineChoice(d, pname::kBrushMode, "Viewer Brush (experimental)",
+                 "Select Keep or Remove, enable Open FX Overlay in the viewer, then paint. "
+                 "Paint directly changes the matte where touched; it does not detect edges.",
+                 pname::kGroupRefine, {"Off", "Keep (green)", "Remove (red)"}, 0);
+    defineDouble(d, pname::kBrushRadius, "Viewer Brush Radius",
+                 "Brush radius in full-resolution image pixels.", pname::kGroupRefine,
+                 25.0, 1.0, 200.0, 1.0, 150.0);
+    defineButton(d, pname::kBrushUndo, "Undo Last Brush Stroke", "Remove the last painted stroke.", pname::kGroupRefine, true);
+    defineButton(d, pname::kBrushClear, "Clear Viewer Brush Strokes", "Remove all painted strokes.", pname::kGroupRefine, true);
+    const Props brushData = d.define(kOfxParamTypeString, pname::kBrushData);
+    common(brushData, "Saved viewer brush strokes", nullptr, pname::kGroupRefine, false, true);
+    if (brushData.valid()) {
+        brushData.setString(kOfxParamPropStringMode, 0, kOfxParamStringIsSingleLine);
+        brushData.setString(kOfxParamPropDefault, 0, "");
+        brushData.setInt(kOfxParamPropSecret, 0, 1);
+    }
+
     defineButton(d, pname::kResetRefine, "Reset Refinement",
                  "Restores the refinement controls to their defaults.", pname::kGroupRefine);
 

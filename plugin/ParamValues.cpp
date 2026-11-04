@@ -324,6 +324,8 @@ ButtonAction classifyButton(const char* paramName) noexcept {
     if (std::strcmp(paramName, pname::kClearCache) == 0) {
         return ButtonAction::ClearCache;
     }
+    if (std::strcmp(paramName, pname::kBrushUndo) == 0) return ButtonAction::BrushUndo;
+    if (std::strcmp(paramName, pname::kBrushClear) == 0) return ButtonAction::BrushClear;
     if (std::strcmp(paramName, pname::kReloadGuidance) == 0) {
         return ButtonAction::ReloadGuidance;
     }

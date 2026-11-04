@@ -6,6 +6,7 @@
 #include "plugin/ParamDefs.h"
 #include "plugin/ParamValues.h"
 #include "plugin/PluginPaths.h"
+#include "plugin/BrushOverlay.h"
 #include "util/Log.h"
 #include "util/Paths.h"
 
@@ -48,6 +49,7 @@ struct FakeHost {
     OfxPropertySuiteV1 props{};
     OfxImageEffectSuiteV1 fx{};
     OfxParameterSuiteV1 params{};
+    OfxInteractSuiteV1 interact{};
     OfxHost host{};
     std::vector<float> source = std::vector<float>(64 * 64 * 4, 0.5f);
     std::vector<float> output = std::vector<float>(64 * 64 * 4, 0.0f);
@@ -57,7 +59,9 @@ struct FakeHost {
     double tolerance = 0.25, softness = 0.08;
     int modelIndex = 0;
     std::string modelValue = "__fallback__";
-    std::string guidancePath;
+    std::string guidancePath, brushData;
+    int brushMode = 0, redraws = 0;
+    double brushRadius = 6;
     OfxImageEffectHandle effect() { return reinterpret_cast<OfxImageEffectHandle>(&effectToken); }
     OfxParamSetHandle paramSet() { return reinterpret_cast<OfxParamSetHandle>(&paramToken); }
     OfxImageClipHandle src() { return reinterpret_cast<OfxImageClipHandle>(&srcToken); }
@@ -71,6 +75,7 @@ const void* fetch(OfxPropertySetHandle, const char* name, int version) {
     if (std::strcmp(name, kOfxPropertySuite) == 0) return &current->props;
     if (std::strcmp(name, kOfxImageEffectSuite) == 0) return &current->fx;
     if (std::strcmp(name, kOfxParameterSuite) == 0) return &current->params;
+    if (std::strcmp(name, kOfxInteractSuite) == 0) return &current->interact;
     return nullptr;
 }
 OfxStatus getParameterAtTime(OfxParamHandle p, OfxTime time, ...) {
@@ -78,10 +83,19 @@ OfxStatus getParameterAtTime(OfxParamHandle p, OfxTime time, ...) {
     if (std::strcmp(name, pname::kFallbackKeyTolerance) != 0 &&
         std::strcmp(name, pname::kFallbackKeySoftness) != 0 &&
         std::strcmp(name, pname::kModel) != 0 &&
-        std::strcmp(name, pname::kGuidancePath) != 0) return kOfxStatErrUnknown;
+        std::strcmp(name, pname::kGuidancePath) != 0 &&
+        std::strcmp(name, pname::kBrushMode) != 0 &&
+        std::strcmp(name, pname::kBrushRadius) != 0 &&
+        std::strcmp(name, pname::kBrushData) != 0) return kOfxStatErrUnknown;
     va_list args;
     va_start(args, time);
-    if (std::strcmp(name, pname::kGuidancePath) == 0) {
+    if (std::strcmp(name, pname::kBrushData) == 0) {
+        char** result = va_arg(args, char**); *result = const_cast<char*>(current->brushData.c_str());
+    } else if (std::strcmp(name, pname::kBrushMode) == 0) {
+        int* result = va_arg(args, int*); *result = current->brushMode;
+    } else if (std::strcmp(name, pname::kBrushRadius) == 0) {
+        double* result = va_arg(args, double*); *result = current->brushRadius;
+    } else if (std::strcmp(name, pname::kGuidancePath) == 0) {
         char** result = va_arg(args, char**);
         *result = const_cast<char*>(current->guidancePath.c_str());
     } else if (std::strcmp(name, pname::kModel) == 0) {
@@ -109,9 +123,22 @@ OfxStatus setParameterAtTime(OfxParamHandle p, OfxTime, ...) {
     --current->recursionDepth;
     return kOfxStatOK;
 }
+OfxStatus setParameter(OfxParamHandle p, ...) {
+    const char* name = reinterpret_cast<const char*>(p);
+    if (std::strcmp(name, pname::kBrushData) != 0) return kOfxStatErrUnknown;
+    va_list args; va_start(args, p);
+    const char* value = va_arg(args, const char*);
+    current->brushData = value ? value : ""; va_end(args);
+    ++current->paramWrites;
+    // Simulate a synchronous host notification for this user-initiated change.
+    Properties changed; put(changed.strings, kOfxPropName, 0, std::string(name));
+    pluginMain(kOfxActionInstanceChanged, current->effect(), handle(changed), nullptr);
+    return kOfxStatOK;
+}
 FakeHost::FakeHost() {
     current = this;
     props.propSetString = [](OfxPropertySetHandle p, const char* k, int i, const char* v) -> OfxStatus { put(properties(p).strings, k, i, std::string(v)); return kOfxStatOK; };
+    props.propSetPointer = [](OfxPropertySetHandle p, const char* k, int, void* v) -> OfxStatus { properties(p).pointers[k] = v; return kOfxStatOK; };
     props.propSetInt = [](OfxPropertySetHandle p, const char* k, int i, int v) -> OfxStatus { put(properties(p).ints, k, i, v); return kOfxStatOK; };
     props.propSetStringN = [](OfxPropertySetHandle p, const char* k, int n, const char* const* v) -> OfxStatus { for (int i=0; i<n; ++i) put(properties(p).strings, k, i, std::string(v[i])); return kOfxStatOK; };
     props.propSetDouble = [](OfxPropertySetHandle p, const char* k, int i, double v) -> OfxStatus { put(properties(p).doubles, k, i, v); return kOfxStatOK; };
@@ -152,6 +179,8 @@ FakeHost::FakeHost() {
     };
     fx.clipReleaseImage = [](OfxPropertySetHandle) -> OfxStatus { return kOfxStatOK; };
     fx.abort = [](OfxImageEffectHandle) -> int { return 0; };
+    interact.interactGetPropertySet = [](OfxInteractHandle h, OfxPropertySetHandle* p) -> OfxStatus { *p = reinterpret_cast<OfxPropertySetHandle>(h); return kOfxStatOK; };
+    interact.interactRedraw = [](OfxInteractHandle) -> OfxStatus { ++current->redraws; return kOfxStatOK; };
     params.paramDefine = [](OfxParamSetHandle, const char*, const char* name, OfxPropertySetHandle* out) -> OfxStatus { *out = handle(current->definitions[name]); return kOfxStatOK; };
     params.paramGetHandle = [](OfxParamSetHandle, const char* name, OfxParamHandle* out, OfxPropertySetHandle*) -> OfxStatus {
         if (std::strcmp(name, pname::kStatusText) && std::strcmp(name, pname::kLogPath) &&
@@ -159,10 +188,12 @@ FakeHost::FakeHost() {
             std::strcmp(name, pname::kEdgeExpansion) && std::strcmp(name, pname::kEdgeSmoothing) &&
             std::strcmp(name, pname::kShiftMatte) && std::strcmp(name, pname::kFallbackKeyTolerance) &&
             std::strcmp(name, pname::kFallbackKeySoftness) && std::strcmp(name, pname::kModel) &&
-            std::strcmp(name, pname::kGuidancePath)) return kOfxStatErrUnknown;
+            std::strcmp(name, pname::kGuidancePath) && std::strcmp(name, pname::kBrushData) &&
+            std::strcmp(name, pname::kBrushMode) && std::strcmp(name, pname::kBrushRadius)) return kOfxStatErrUnknown;
         *out = reinterpret_cast<OfxParamHandle>(const_cast<char*>(name)); return kOfxStatOK;
     };
     params.paramGetValueAtTime = getParameterAtTime;
+    params.paramSetValue = setParameter;
     // Simulate a host which synchronously notifies on every plugin-authored parameter write.
     params.paramSetValueAtTime = setParameterAtTime;
     host.host = handle(hostProps); host.fetchSuite = fetch;
@@ -316,6 +347,9 @@ TEST(ofxStability, realModelCanBeSelectedWhenAssetsSupplied) {
         CHECK(instance->pipeline().matteSource() != nullptr);
         if (instance->pipeline().matteSource()) CHECK_EQ(std::string(instance->pipeline().matteSource()->name()), std::string("U2NetP CPU"));
     }
+    host.brushData = "AIBGR1 1 R 5 1 10 54 ";
+    CHECK_EQ(pluginMain(kOfxImageEffectActionRender, host.effect(), handle(host.args), nullptr), kOfxStatOK);
+    CHECK_NEAR(host.output[(54*64+10)*4+3], 0.0, 1e-6); // brush overrides PNG + AI
     CHECK_EQ(pluginMain(kOfxActionDestroyInstance, host.effect(), nullptr, nullptr), kOfxStatOK);
 }
 
@@ -352,5 +386,43 @@ TEST(ofxStability, guidanceFileCorrectsMatteAndReloadsWithoutParamWrites) {
     CHECK_EQ(pluginMain(kOfxImageEffectActionRender, host.effect(), handle(host.args), nullptr), kOfxStatOK);
     CHECK_NEAR(host.output[(54*64+10)*4+3], 1.0, 1e-6);
     CHECK_EQ(host.paramWrites, 0);
+    CHECK_EQ(pluginMain(kOfxActionDestroyInstance, host.effect(), nullptr, nullptr), kOfxStatOK);
+}
+
+TEST(ofxStability, viewerBrushPenActionsPersistAndRender) {
+    FakeHost host; setModelUsesStrChoice(false);
+    put(host.hostProps.ints, kOfxImageEffectPropSupportsOverlays, 0, 1);
+    CHECK(HostBridge::instance().acquireSuites().ok());
+    CHECK_EQ(describeEffect(host.effect()), kOfxStatOK);
+    CHECK(host.effectProps.pointers[kOfxImageEffectPluginPropOverlayInteractV1] != nullptr);
+    CHECK_EQ(pluginMain(kOfxActionCreateInstance, host.effect(), nullptr, nullptr), kOfxStatOK);
+    Properties overlay, pen;
+    overlay.pointers[kOfxPropEffectInstance] = host.effect();
+    pen.doubles[kOfxInteractPropPenPosition] = {20.0, 20.0};
+    const void* h = reinterpret_cast<const void*>(handle(overlay));
+    CHECK_EQ(brushOverlayMain(kOfxActionCreateInstance, h, nullptr, nullptr), kOfxStatOK);
+    CHECK_EQ(brushOverlayMain(kOfxInteractActionDraw, h, handle(pen), nullptr), kOfxStatOK);
+    CHECK_EQ(brushOverlayMain(kOfxInteractActionPenDown, h, handle(pen), nullptr), kOfxStatReplyDefault);
+    host.brushMode = 1;
+    CHECK_EQ(brushOverlayMain(kOfxInteractActionPenDown, h, handle(pen), nullptr), kOfxStatOK);
+    pen.doubles[kOfxInteractPropPenPosition] = {30.0, 20.0};
+    CHECK_EQ(brushOverlayMain(kOfxInteractActionPenMotion, h, handle(pen), nullptr), kOfxStatOK);
+    CHECK_EQ(brushOverlayMain(kOfxInteractActionPenUp, h, handle(pen), nullptr), kOfxStatOK);
+    CHECK_EQ(host.paramWrites, 1);
+    CHECK(host.redraws > 0);
+    CHECK_EQ(pluginMain(kOfxImageEffectActionRender, host.effect(), handle(host.args), nullptr), kOfxStatOK);
+    CHECK_NEAR(host.output[(20*64+25)*4+3], 1.0, 1e-6);
+    CHECK_NEAR(host.output[(50*64+50)*4+3], 0.0, 1e-6);
+    CHECK_EQ(host.paramWrites, 1); // renders do not write back to parameters
+    // Host-saved parameter data is enough for a new effect instance to reproduce the stroke.
+    CHECK_EQ(pluginMain(kOfxActionDestroyInstance, host.effect(), nullptr, nullptr), kOfxStatOK);
+    CHECK_EQ(pluginMain(kOfxActionCreateInstance, host.effect(), nullptr, nullptr), kOfxStatOK);
+    CHECK_EQ(pluginMain(kOfxImageEffectActionRender, host.effect(), handle(host.args), nullptr), kOfxStatOK);
+    CHECK_NEAR(host.output[(20*64+25)*4+3], 1.0, 1e-6);
+    put(host.args.strings, kOfxPropName, 0, std::string(pname::kBrushUndo));
+    CHECK_EQ(pluginMain(kOfxActionInstanceChanged, host.effect(), handle(host.args), nullptr), kOfxStatOK);
+    CHECK_EQ(pluginMain(kOfxImageEffectActionRender, host.effect(), handle(host.args), nullptr), kOfxStatOK);
+    CHECK_NEAR(host.output[(20*64+25)*4+3], 0.0, 1e-6);
+    CHECK_EQ(brushOverlayMain(kOfxActionDestroyInstance, h, nullptr, nullptr), kOfxStatOK);
     CHECK_EQ(pluginMain(kOfxActionDestroyInstance, host.effect(), nullptr, nullptr), kOfxStatOK);
 }

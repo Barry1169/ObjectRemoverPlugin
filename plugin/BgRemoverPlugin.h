@@ -13,6 +13,7 @@
 #include "core/PipelineSettings.h"
 #include "inference/U2NetSegmenter.h"
 #include "guidance/CorrectionMask.h"
+#include "guidance/BrushStrokes.h"
 #include "plugin/OfxImageAdapter.h"
 #include "util/Status.h"
 
@@ -108,6 +109,7 @@ private:
     std::unique_ptr<Pipeline> pipeline_;
     std::unique_ptr<U2NetSegmenter> aiSegmenter_;
     CorrectionMask guidance_;
+    BrushCorrections brush_;
     bool aiLoadAttempted_ = false;
     OfxAbortChecker abortChecker_;
 

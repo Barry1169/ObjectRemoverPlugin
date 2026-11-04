@@ -169,6 +169,7 @@ add_library(aibgr_core STATIC
   matte/PlaceholderMatte.cpp
   inference/U2NetSegmenter.cpp
   guidance/CorrectionMask.cpp
+  guidance/BrushStrokes.cpp
   composite/Compositor.cpp
 )
 target_include_directories(aibgr_core
@@ -211,6 +212,7 @@ set(AIBGR_OFX_SOURCES
   plugin/PluginPaths.cpp
   plugin/OfxImageAdapter.cpp
   plugin/BgRemoverPlugin.cpp
+  plugin/BrushOverlay.cpp
 )
 add_library(${OFX_PLUGIN_NAME} MODULE ${AIBGR_OFX_SOURCES})
 target_link_libraries(${OFX_PLUGIN_NAME} PRIVATE aibgr_core)
@@ -272,6 +274,7 @@ if(BUILD_TESTS)
     tests/test_pipeline_settings.cpp
     tests/test_u2net.cpp
     tests/test_guidance.cpp
+    tests/test_brush.cpp
   )
   target_compile_definitions(aibgr_tests PRIVATE AIBGR_TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures")
   target_link_libraries(aibgr_tests PRIVATE aibgr_core)

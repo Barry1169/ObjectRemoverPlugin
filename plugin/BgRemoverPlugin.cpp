@@ -14,6 +14,7 @@
 #include "plugin/ParamDefs.h"
 #include "plugin/ParamValues.h"
 #include "plugin/PluginPaths.h"
+#include "plugin/BrushOverlay.h"
 #include "util/Log.h"
 #include "util/Paths.h"
 
@@ -231,6 +232,10 @@ void PluginInstance::instanceChanged(const char* paramName, double time) {
         AIBGR_LOGI("guidance reload requested; next render will read the PNG");
         return;
     }
+    case ButtonAction::BrushUndo:
+    case ButtonAction::BrushClear:
+        editSavedBrush(paramSet_, time, classifyButton(paramName) == ButtonAction::BrushClear);
+        return;
     case ButtonAction::None:
         break;
     }
@@ -401,8 +406,12 @@ Result PluginInstance::render(double time, OfxPropertySetHandle inArgs) {
         srcInfo = inspectImage(srcImgProps);
     }
 
-    std::string guidancePath;
-    if (paramSet_) ParamReader(bridge.params(), paramSet_).getString(pname::kGuidancePath, time, guidancePath);
+    std::string guidancePath, brushData;
+    if (paramSet_) {
+        const ParamReader p(bridge.params(), paramSet_);
+        p.getString(pname::kGuidancePath, time, guidancePath);
+        p.getString(pname::kBrushData, time, brushData);
+    }
 
     Result outcome = Result::success();
     // Protect reusable per-instance buffers against cache purges and misbehaving hosts that
@@ -414,6 +423,7 @@ Result PluginInstance::render(double time, OfxPropertySetHandle inArgs) {
     }
 
     if (haveSource && srcInfo.valid()) {
+        if (srcInfo.pixelAspectRatio > 0) ctx.pixelAspectX = srcInfo.pixelAspectRatio;
         const bool unpremult = (srcInfo.premultiplication == OfxPremult::Premultiplied);
         const Result read = readImageToFloat(srcInfo, window, srcFloat_, unpremult);
         if (!read.ok()) {
@@ -439,6 +449,10 @@ Result PluginInstance::render(double time, OfxPropertySetHandle inArgs) {
                 else AIBGR_LOGE("guidance PNG ignored: %s (%s)", guidancePath.c_str(), guide.toString().c_str());
             }
             pipeline_->setMatteOverride(guide.ok() && guidance_.ready() ? &guidance_ : nullptr);
+            std::vector<BrushStroke> strokes;
+            if (!parseBrushStrokes(brushData, strokes)) AIBGR_LOGE("invalid saved brush data; ignoring strokes");
+            brush_.configure(std::move(strokes), ctx);
+            pipeline_->setBrushOverride(brushData.empty() ? nullptr : &brush_);
             const Result proc = pipeline_->process(ctx, settings, srcFloat_, dstFloat_, lastStats_);
             if (!proc.ok()) {
                 // D9: never fail a render over a content problem. Pass the source through so the
@@ -551,8 +565,16 @@ OfxStatus describeEffect(OfxImageEffectHandle effect) noexcept {
     // output. The field guide records Resolve 21 driving this plugin at Float throughout.
     p.setInt(kOfxImageEffectPropSupportsMultipleClipDepths, 0, 0);
 
-    // No custom interact, so no overlay.
-    p.setInt(kOfxImageEffectPropSupportsOverlays, 0, 0);
+    // The host may not provide overlays. Advertise the legacy OFX 1.4 viewer interact only when
+    // the host exposes the interact suite; existing rendering stays usable without it.
+    if (bridge.caps().supportsOverlays && bridge.interact()) {
+        const OfxStatus status = bridge.props()->propSetPointer(props, kOfxImageEffectPluginPropOverlayInteractV1,
+                                                               0, reinterpret_cast<void*>(&brushOverlayMain));
+        if (status == kOfxStatOK) AIBGR_LOGI("viewer brush overlay registered (OFX interact v1)");
+        else AIBGR_LOGE("viewer brush overlay registration failed: %d", static_cast<int>(status));
+    } else {
+        AIBGR_LOGI("viewer brush overlay unavailable on this host");
+    }
 
     // Frame varying: with temporal stabilisation on, two renders of the same frame can differ
     // because the recurrent state differs. Declaring this honestly is what stops the host caching

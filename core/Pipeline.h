@@ -91,6 +91,7 @@ public:
     void setMatteSource(MatteSource* source) noexcept { matteSource_ = source; }
     MatteSource* matteSource() const noexcept { return matteSource_; }
     void setMatteOverride(const MatteOverride* value) noexcept { matteOverride_ = value; }
+    void setBrushOverride(const MatteOverride* value) noexcept { brushOverride_ = value; }
 
     void setAbortChecker(const AbortChecker* checker) noexcept { abortChecker_ = checker; }
 
@@ -117,6 +118,7 @@ private:
 
     MatteSource* matteSource_ = nullptr;
     const MatteOverride* matteOverride_ = nullptr;
+    const MatteOverride* brushOverride_ = nullptr;
     std::unique_ptr<FallbackKeyMatteSource> fallback_;
     const AbortChecker* abortChecker_ = nullptr;
 

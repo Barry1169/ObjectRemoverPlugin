@@ -5,7 +5,13 @@ are installed. It has been tested using real inference on Linux, including a fak
 feature has not yet been tested in Windows/Resolve; previously reported playback crashes remain
 unproven fixed. The original colour-key fallback remains available.
 
-## Painted guidance PNG (new)
+## Experimental in-Resolve viewer brush
+
+A new prototype lets the user paint direct keep/remove corrections in the Resolve viewer, without
+GIMP or a PNG. It does not yet perform GIMP-like automatic selection or tracking and has not yet
+been tested inside Resolve. See [07-viewer-brush.md](07-viewer-brush.md).
+
+## Painted guidance PNG (optional alternative)
 
 Optional full-frame transparent PNG corrections can force specific pixels to be kept (green) or
 removed (red) on top of the AI or colour key. This is manual painting, **not GIMP's matting

@@ -6,6 +6,7 @@
 
 #include "ofxCore.h"
 #include "ofxImageEffect.h"
+#include "ofxInteract.h"
 #include "ofxMemory.h"
 #include "ofxMessage.h"
 #include "ofxMultiThread.h"
@@ -135,6 +136,7 @@ public:
     const OfxMemorySuiteV1* memory() const noexcept { return memory_; }
     const OfxMessageSuiteV2* message() const noexcept { return message_; }
     const OfxMultiThreadSuiteV1* threads() const noexcept { return threads_; }
+    const OfxInteractSuiteV1* interact() const noexcept { return interact_; }
 
     const HostCaps& caps() const noexcept { return caps_; }
 
@@ -147,6 +149,7 @@ private:
     HostBridge() = default;
 
     const OfxHost* host_ = nullptr;
+    const OfxInteractSuiteV1* interact_ = nullptr;
     const OfxPropertySuiteV1* props_ = nullptr;
     const OfxImageEffectSuiteV1* effect_ = nullptr;
     const OfxParameterSuiteV1* params_ = nullptr;

@@ -4,7 +4,8 @@
 and produced renders in Resolve; the new painted-mask feature still requires Windows/Resolve testing.
 The previously reported playback crashes remain unproven fixed. Back up projects, logs and the existing bundle before testing in a disposable project.
 
-For the optional manually painted guidance PNG, see [06-guidance-mask.md](06-guidance-mask.md).
+For the experimental in-Resolve viewer brush, see [07-viewer-brush.md](07-viewer-brush.md).
+The optional external PNG workflow is described separately in [06-guidance-mask.md](06-guidance-mask.md).
 
 ## Quick start for this checkout
 
