@@ -28,6 +28,8 @@ constexpr const char* kEdgeFeather = "edgeFeather";
 constexpr const char* kEdgeExpansion = "edgeExpansion";
 constexpr const char* kEdgeSmoothing = "edgeSmoothing";
 constexpr const char* kShiftMatte = "shiftMatte";
+constexpr const char* kGuidancePath = "guidancePngPath";
+constexpr const char* kReloadGuidance = "reloadGuidancePng";
 constexpr const char* kResetRefine = "resetRefine";
 
 // Output

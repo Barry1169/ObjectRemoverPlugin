@@ -57,6 +57,7 @@ struct FakeHost {
     double tolerance = 0.25, softness = 0.08;
     int modelIndex = 0;
     std::string modelValue = "__fallback__";
+    std::string guidancePath;
     OfxImageEffectHandle effect() { return reinterpret_cast<OfxImageEffectHandle>(&effectToken); }
     OfxParamSetHandle paramSet() { return reinterpret_cast<OfxParamSetHandle>(&paramToken); }
     OfxImageClipHandle src() { return reinterpret_cast<OfxImageClipHandle>(&srcToken); }
@@ -76,10 +77,14 @@ OfxStatus getParameterAtTime(OfxParamHandle p, OfxTime time, ...) {
     const char* name = reinterpret_cast<const char*>(p);
     if (std::strcmp(name, pname::kFallbackKeyTolerance) != 0 &&
         std::strcmp(name, pname::kFallbackKeySoftness) != 0 &&
-        std::strcmp(name, pname::kModel) != 0) return kOfxStatErrUnknown;
+        std::strcmp(name, pname::kModel) != 0 &&
+        std::strcmp(name, pname::kGuidancePath) != 0) return kOfxStatErrUnknown;
     va_list args;
     va_start(args, time);
-    if (std::strcmp(name, pname::kModel) == 0) {
+    if (std::strcmp(name, pname::kGuidancePath) == 0) {
+        char** result = va_arg(args, char**);
+        *result = const_cast<char*>(current->guidancePath.c_str());
+    } else if (std::strcmp(name, pname::kModel) == 0) {
         if (modelUsesStrChoice()) {
             char** result = va_arg(args, char**);
             *result = const_cast<char*>(current->modelValue.c_str());
@@ -153,7 +158,8 @@ FakeHost::FakeHost() {
             std::strcmp(name, pname::kDetailRefinement) && std::strcmp(name, pname::kEdgeFeather) &&
             std::strcmp(name, pname::kEdgeExpansion) && std::strcmp(name, pname::kEdgeSmoothing) &&
             std::strcmp(name, pname::kShiftMatte) && std::strcmp(name, pname::kFallbackKeyTolerance) &&
-            std::strcmp(name, pname::kFallbackKeySoftness) && std::strcmp(name, pname::kModel)) return kOfxStatErrUnknown;
+            std::strcmp(name, pname::kFallbackKeySoftness) && std::strcmp(name, pname::kModel) &&
+            std::strcmp(name, pname::kGuidancePath)) return kOfxStatErrUnknown;
         *out = reinterpret_cast<OfxParamHandle>(const_cast<char*>(name)); return kOfxStatOK;
     };
     params.paramGetValueAtTime = getParameterAtTime;
@@ -299,8 +305,11 @@ TEST(ofxStability, realModelCanBeSelectedWhenAssetsSupplied) {
     FakeHost host;
     setModelUsesStrChoice(false);
     host.modelIndex = 1;
+    host.guidancePath = std::string(AIBGR_TEST_DATA_DIR) + "/guidance.png";
     CHECK_EQ(pluginMain(kOfxActionCreateInstance, host.effect(), nullptr, nullptr), kOfxStatOK);
     CHECK_EQ(pluginMain(kOfxImageEffectActionRender, host.effect(), handle(host.args), nullptr), kOfxStatOK);
+    CHECK_NEAR(host.output[(54*64+10)*4+3], 1.0, 1e-6);
+    CHECK_NEAR(host.output[(54*64+54)*4+3], 0.0, 1e-6);
     PluginInstance* instance = findInstance(host.effect());
     CHECK(instance != nullptr);
     if (instance) {
@@ -328,3 +337,20 @@ TEST(ofxStability, strChoiceHasStableModelValues) {
     setModelUsesStrChoice(false);
 }
 #endif
+
+TEST(ofxStability, guidanceFileCorrectsMatteAndReloadsWithoutParamWrites) {
+    FakeHost host;
+    setModelUsesStrChoice(false);
+    host.guidancePath = std::string(AIBGR_TEST_DATA_DIR) + "/guidance.png";
+    CHECK_EQ(pluginMain(kOfxActionCreateInstance, host.effect(), nullptr, nullptr), kOfxStatOK);
+    CHECK_EQ(pluginMain(kOfxImageEffectActionRender, host.effect(), handle(host.args), nullptr), kOfxStatOK);
+    CHECK_NEAR(host.output[(54*64+10)*4+3], 1.0, 1e-6);
+    CHECK_NEAR(host.output[(54*64+54)*4+3], 0.0, 1e-6);
+    CHECK_EQ(host.paramWrites, 0);
+    put(host.args.strings, kOfxPropName, 0, std::string(pname::kReloadGuidance));
+    CHECK_EQ(pluginMain(kOfxActionInstanceChanged, host.effect(), handle(host.args), nullptr), kOfxStatOK);
+    CHECK_EQ(pluginMain(kOfxImageEffectActionRender, host.effect(), handle(host.args), nullptr), kOfxStatOK);
+    CHECK_NEAR(host.output[(54*64+10)*4+3], 1.0, 1e-6);
+    CHECK_EQ(host.paramWrites, 0);
+    CHECK_EQ(pluginMain(kOfxActionDestroyInstance, host.effect(), nullptr, nullptr), kOfxStatOK);
+}

@@ -168,6 +168,7 @@ add_library(aibgr_core STATIC
   matte/Resize.cpp
   matte/PlaceholderMatte.cpp
   inference/U2NetSegmenter.cpp
+  guidance/CorrectionMask.cpp
   composite/Compositor.cpp
 )
 target_include_directories(aibgr_core
@@ -175,7 +176,7 @@ target_include_directories(aibgr_core
          "${CMAKE_CURRENT_BINARY_DIR}/generated"
 )
 target_compile_features(aibgr_core PUBLIC cxx_std_${OFX_CXX_STANDARD})
-target_include_directories(aibgr_core PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/third_party/onnxruntime/include")
+target_include_directories(aibgr_core PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/third_party/onnxruntime/include" "${CMAKE_CURRENT_SOURCE_DIR}/third_party/stb")
 target_link_libraries(aibgr_core PUBLIC ${CMAKE_DL_LIBS})
 set_target_properties(aibgr_core PROPERTIES CXX_VISIBILITY_PRESET hidden
                                             VISIBILITY_INLINES_HIDDEN ON)
@@ -270,7 +271,9 @@ if(BUILD_TESTS)
     tests/test_pipeline.cpp
     tests/test_pipeline_settings.cpp
     tests/test_u2net.cpp
+    tests/test_guidance.cpp
   )
+  target_compile_definitions(aibgr_tests PRIVATE AIBGR_TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures")
   target_link_libraries(aibgr_tests PRIVATE aibgr_core)
   target_include_directories(aibgr_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/tests")
   add_test(NAME aibgr_tests COMMAND aibgr_tests)
@@ -279,6 +282,7 @@ if(BUILD_TESTS)
   # catch recursive parameter notifications or an incorrect thread-safety descriptor.
   find_package(Threads REQUIRED)
   add_executable(aibgr_ofx_tests tests/TestMain.cpp tests/test_ofx_stability.cpp ${AIBGR_OFX_SOURCES})
+  target_compile_definitions(aibgr_ofx_tests PRIVATE AIBGR_TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures")
   target_link_libraries(aibgr_ofx_tests PRIVATE aibgr_core Threads::Threads)
   target_include_directories(aibgr_ofx_tests PRIVATE "${OPENFX_INCLUDE_DIR}" "${CMAKE_CURRENT_SOURCE_DIR}/tests")
   add_test(NAME aibgr_ofx_tests COMMAND aibgr_ofx_tests)

@@ -224,9 +224,9 @@ void defineChoice(Definer& d, const char* name, const char* label, const char* h
 }
 
 void defineButton(Definer& d, const char* name, const char* label, const char* hint,
-                  const char* parent) {
+                  const char* parent, bool evaluateOnChange = false) {
     const Props h = d.define(kOfxParamTypePushButton, name);
-    common(h, label, hint, parent, /*animates*/ false, /*evaluateOnChange*/ false);
+    common(h, label, hint, parent, /*animates*/ false, evaluateOnChange);
     if (!h.valid()) {
         return;
     }
@@ -382,6 +382,20 @@ Result defineParameters(OfxParamSetHandle paramSet, const std::vector<ModelChoic
 
     defineButton(d, pname::kResetRefine, "Reset Refinement",
                  "Restores the refinement controls to their defaults.", pname::kGroupRefine);
+
+    const Props guidance = d.define(kOfxParamTypeString, pname::kGuidancePath);
+    common(guidance, "Guidance PNG (green keep, red remove)",
+           "Optional transparent PNG exactly the render frame size. Paint opaque green over "
+           "areas to keep and opaque red over areas to remove; transparent areas use the "
+           "AI or colour-key matte. No automatic edge detection. For stills or locked-off shots.",
+           pname::kGroupRefine, false, true);
+    if (guidance.valid()) {
+        guidance.setString(kOfxParamPropStringMode, 0, kOfxParamStringIsFilePath);
+        guidance.setString(kOfxParamPropDefault, 0, "");
+    }
+    defineButton(d, pname::kReloadGuidance, "Reload Guidance PNG",
+                 "Reload the guidance file on the next render after editing it externally.",
+                 pname::kGroupRefine, true);
 
     // --- Tab 3: Output -----------------------------------------------------
     defineGroup(d, pname::kGroupOutput, "Output", /*open*/ false);

@@ -1,8 +1,10 @@
 # 05 — Windows Build, Install, Model Acquisition, and Test Recipe
 
-**Current implementation:** U2NetP AI on CPU is optional and tested with real inference on Linux.
-The Windows installation, DLL loading, Resolve rendering and reported playback crashes require
-verification. Back up projects, logs and the existing bundle before testing in a disposable project.
+**Current implementation:** U2NetP AI on CPU is optional. The earlier build passed Windows inference
+and produced renders in Resolve; the new painted-mask feature still requires Windows/Resolve testing.
+The previously reported playback crashes remain unproven fixed. Back up projects, logs and the existing bundle before testing in a disposable project.
+
+For the optional manually painted guidance PNG, see [06-guidance-mask.md](06-guidance-mask.md).
 
 ## Quick start for this checkout
 

@@ -56,7 +56,7 @@ Result readSettings(OfxParamSetHandle paramSet, double time, PipelineSettings& o
                     std::string& statusNote);
 
 /// Push-button handling.
-enum class ButtonAction : uint8_t { None = 0, ResetRefine, PreloadModel, ClearCache, ResetTemporal };
+enum class ButtonAction : uint8_t { None = 0, ResetRefine, PreloadModel, ClearCache, ResetTemporal, ReloadGuidance };
 
 ButtonAction classifyButton(const char* paramName) noexcept;
 

@@ -202,12 +202,19 @@ Result Pipeline::process(const FrameContext& ctx, const PipelineSettings& settin
     }
 
     // --- 8. Upscale the matte back to frame resolution ---------------------
-    const Matte* finalMatte = &rawMatte_;
+    Matte* finalMatte = &rawMatte_;
     if (mw != w || mh != h) {
         fullMatte_.resize(w, h);
         resizeBicubic(rawMatte_, fullMatte_);
         finalMatte = &fullMatte_;
         stats.matteUpscaled = true;
+    }
+
+    // Apply manual corrections at full resolution, so thin painted strokes are not
+    // reduced to the AI model's 320-pixel input. On mismatch leave the base matte intact.
+    if (matteOverride_) {
+        const Result corrected = matteOverride_->apply(*finalMatte, effective.matteInvert);
+        if (!corrected.ok()) AIBGR_LOGE("guidance mask: %s", corrected.toString().c_str());
     }
 
     // --- 9. Composite ------------------------------------------------------

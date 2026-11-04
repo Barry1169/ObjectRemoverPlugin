@@ -32,6 +32,13 @@ public:
     virtual const char* name() const noexcept = 0;
 };
 
+/// Optional full-resolution manual correction, applied after the base matte is upscaled.
+class MatteOverride {
+public:
+    virtual ~MatteOverride() = default;
+    virtual Result apply(Matte& matte, bool inverted = false) const = 0;
+};
+
 /// The built-in border-colour key, wrapped as a MatteSource.
 class FallbackKeyMatteSource final : public MatteSource {
 public:
@@ -83,6 +90,7 @@ public:
     /// Non-owning. Pass nullptr to use the built-in fallback key.
     void setMatteSource(MatteSource* source) noexcept { matteSource_ = source; }
     MatteSource* matteSource() const noexcept { return matteSource_; }
+    void setMatteOverride(const MatteOverride* value) noexcept { matteOverride_ = value; }
 
     void setAbortChecker(const AbortChecker* checker) noexcept { abortChecker_ = checker; }
 
@@ -108,6 +116,7 @@ private:
                                  int& outH) noexcept;
 
     MatteSource* matteSource_ = nullptr;
+    const MatteOverride* matteOverride_ = nullptr;
     std::unique_ptr<FallbackKeyMatteSource> fallback_;
     const AbortChecker* abortChecker_ = nullptr;
 

@@ -1,9 +1,15 @@
 # AI Background Remover — OFX Plugin for DaVinci Resolve
 
 **Current status:** U2NetP AI segmentation runs on CPU when the optional model and ONNX Runtime
-are installed. It has been tested using real inference on Linux, including a fake OFX host. The
-Windows build, Windows runtime loading, Resolve result and previously reported playback crashes
-still need verification. The original colour-key fallback remains available.
+are installed. It has been tested using real inference on Linux, including a fake OFX host. The prior AI build compiled on Windows and produced renders in Resolve. The new manual guidance
+feature has not yet been tested in Windows/Resolve; previously reported playback crashes remain
+unproven fixed. The original colour-key fallback remains available.
+
+## Painted guidance PNG (new)
+
+Optional full-frame transparent PNG corrections can force specific pixels to be kept (green) or
+removed (red) on top of the AI or colour key. This is manual painting, **not GIMP's matting
+algorithm**, and it does not track moving objects. See the [step-by-step guide](06-guidance-mask.md).
 
 ## Current controls and log location
 

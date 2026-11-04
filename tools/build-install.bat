@@ -68,6 +68,7 @@ if errorlevel 1 (
     set "VCVARS="
     for %%D in (
         "%ProgramFiles%\Microsoft Visual Studio\18\BuildTools\VC\Auxiliary\Build\vcvars64.bat"
+        "%ProgramFiles(x86)%\Microsoft Visual Studio\18\BuildTools\VC\Auxiliary\Build\vcvars64.bat"
         "%ProgramFiles%\Microsoft Visual Studio\18\*\VC\Auxiliary\Build\vcvars64.bat"
         "%ProgramFiles(x86)%\Microsoft Visual Studio\18\*\VC\Auxiliary\Build\vcvars64.bat"
         "%ProgramFiles%\Microsoft Visual Studio\2022\*\VC\Auxiliary\Build\vcvars64.bat"
@@ -189,8 +190,8 @@ echo.
 echo The dependents list above should contain KERNEL32.dll and nothing else while the
 echo CRT is linked statically. VCRUNTIME140.dll or MSVCP140.dll means -DOFX_STATIC_CRT=ON
 echo did not apply and the plugin will fail to load on a machine without that
-echo redistributable. Once ONNX Runtime is added in Phase 3 its DLLs appear here too and
-echo must be copied into the bundle alongside the .ofx.
+echo redistributable. ONNX Runtime is loaded dynamically and will not appear here.
+echo The optional CPU DLL is loaded from the workspace runtime directory.
 echo.
 
 if /I "%~1"=="build" (

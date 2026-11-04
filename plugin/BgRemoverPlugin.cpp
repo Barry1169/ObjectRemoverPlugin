@@ -172,6 +172,8 @@ Result PluginInstance::readSettings(double time, PipelineSettings& out, std::str
 void PluginInstance::clearCache() {
     std::lock_guard<std::mutex> lock(scratchMutex_);
     pipeline_->releaseBuffers();
+    guidance_.clear();
+    pipeline_->setMatteOverride(nullptr);
     srcFloat_.release();
     dstFloat_.release();
     lastRenderedTime_ = -1e18;
@@ -222,6 +224,13 @@ void PluginInstance::instanceChanged(const char* paramName, double time) {
     case ButtonAction::ResetTemporal:
         resetTemporalState();
         return;
+    case ButtonAction::ReloadGuidance: {
+        std::lock_guard<std::mutex> lock(scratchMutex_);
+        guidance_.clear();
+        pipeline_->setMatteOverride(nullptr);
+        AIBGR_LOGI("guidance reload requested; next render will read the PNG");
+        return;
+    }
     case ButtonAction::None:
         break;
     }
@@ -392,6 +401,9 @@ Result PluginInstance::render(double time, OfxPropertySetHandle inArgs) {
         srcInfo = inspectImage(srcImgProps);
     }
 
+    std::string guidancePath;
+    if (paramSet_) ParamReader(bridge.params(), paramSet_).getString(pname::kGuidancePath, time, guidancePath);
+
     Result outcome = Result::success();
     // Protect reusable per-instance buffers against cache purges and misbehaving hosts that
     // invoke concurrent renders despite our instance-safe descriptor. No parameter is written
@@ -420,6 +432,13 @@ Result PluginInstance::render(double time, OfxPropertySetHandle inArgs) {
                 }
             }
             pipeline_->setMatteSource(useAi ? aiSegmenter_.get() : nullptr);
+            bool guidanceChanged = false;
+            const Result guide = guidance_.update(guidancePath, guidanceChanged);
+            if (guidanceChanged && !guidancePath.empty()) {
+                if (guide.ok()) AIBGR_LOGI("guidance PNG loaded: %s", guidancePath.c_str());
+                else AIBGR_LOGE("guidance PNG ignored: %s (%s)", guidancePath.c_str(), guide.toString().c_str());
+            }
+            pipeline_->setMatteOverride(guide.ok() && guidance_.ready() ? &guidance_ : nullptr);
             const Result proc = pipeline_->process(ctx, settings, srcFloat_, dstFloat_, lastStats_);
             if (!proc.ok()) {
                 // D9: never fail a render over a content problem. Pass the source through so the
