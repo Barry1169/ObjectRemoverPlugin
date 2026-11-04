@@ -11,7 +11,8 @@ It needs testing on the actual image; do not assume it will recover the whole tr
 1. Back up the project and plugin bundle, close Resolve before installing, then test in a disposable
    project. Choose **U2NetP (AI, CPU)** for the starting matte. The Guidance PNG field may stay empty.
 2. Select the effect and enable **Open FX Overlay** in the viewer. A small toolbar should appear
-   near the lower-left corner of the source image. Its nine buttons are **O L K R G − + U X**:
+   near the lower-left corner of the source image. It has a dark background and larger icons;
+   actual appearance depends on the host's OpenGL context. Its nine buttons are **O L K R G − + U X**:
    - **O**: stop drawing. **L**: rough outline and turn on guided selection. **K**: green keep
      brush. **R**: red remove brush. **G**: toggle guided/manual selection.
    - **− / +**: reduce/increase brush radius. **U**: undo last stroke/outline. **X**: clear all.
@@ -31,7 +32,8 @@ It needs testing on the actual image; do not assume it will recover the whole tr
    hide the toolbar too; it should not disable the matte.
 5. Verify saving/reopening, proxy/full-resolution alignment and the final export before relying on
    it. The earlier direct brush has been exercised in Resolve 21; this new toolbar and guided
-   selector have only been tested with a simulated host, not in Resolve on Windows yet.
+   selector are experimental; the toolbar and marking input have been exercised in Resolve 21,
+   but selection quality, persistence and final export still require verification.
 
 ## What it does and limitations
 
@@ -47,7 +49,8 @@ It needs testing on the actual image; do not assume it will recover the whole tr
   override the outline locally. A new outline replaces the previous one for selection, but undo
   restores the earlier one.
 - The combined limit remains 512 sampled points; if a new stroke exceeds the limit it is discarded
-  and logged. Use fewer/shorter strokes, Undo or Clear. Errors are in the plugin log.
+  and logged. A warning is also sent to the host when available, though Resolve may not display it.
+  Use fewer/shorter strokes, Undo or Clear. Errors are in the plugin log.
 - Marks are static image coordinates, **not motion tracking** or temporal propagation. The model
   runs on CPU per frame; guided selection adds CPU work. Results may differ on proxies and exports.
 - Existing projects default to **Manual corrections** and retain their old brush behavior. The

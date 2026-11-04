@@ -50,6 +50,7 @@ struct FakeHost {
     OfxImageEffectSuiteV1 fx{};
     OfxParameterSuiteV1 params{};
     OfxInteractSuiteV1 interact{};
+    OfxMessageSuiteV1 messages{};
     OfxHost host{};
     std::vector<float> source = std::vector<float>(64 * 64 * 4, 0.5f);
     std::vector<float> output = std::vector<float>(64 * 64 * 4, 0.0f);
@@ -59,7 +60,7 @@ struct FakeHost {
     double tolerance = 0.25, softness = 0.08;
     int modelIndex = 0;
     std::string modelValue = "__fallback__";
-    std::string guidancePath, brushData;
+    std::string guidancePath, brushData, warning;
     int brushMode = 0, selectionMode = 0, redraws = 0;
     double brushRadius = 6;
     OfxImageEffectHandle effect() { return reinterpret_cast<OfxImageEffectHandle>(&effectToken); }
@@ -69,6 +70,10 @@ struct FakeHost {
     FakeHost();
 };
 FakeHost* current = nullptr;
+OfxStatus captureMessage(void*, const char*, const char*, const char* format, ...) {
+    va_list ap; va_start(ap, format); const char* text=va_arg(ap,const char*);
+    current->warning=text ? text : ""; va_end(ap); return kOfxStatOK;
+}
 
 const void* fetch(OfxPropertySetHandle, const char* name, int version) {
     if (version != 1) return nullptr;
@@ -76,6 +81,7 @@ const void* fetch(OfxPropertySetHandle, const char* name, int version) {
     if (std::strcmp(name, kOfxImageEffectSuite) == 0) return &current->fx;
     if (std::strcmp(name, kOfxParameterSuite) == 0) return &current->params;
     if (std::strcmp(name, kOfxInteractSuite) == 0) return &current->interact;
+    if (std::strcmp(name, kOfxMessageSuite) == 0) return &current->messages;
     return nullptr;
 }
 OfxStatus getParameterAtTime(OfxParamHandle p, OfxTime time, ...) {
@@ -186,6 +192,7 @@ FakeHost::FakeHost() {
     };
     fx.clipReleaseImage = [](OfxPropertySetHandle) -> OfxStatus { return kOfxStatOK; };
     fx.abort = [](OfxImageEffectHandle) -> int { return 0; };
+    messages.message = captureMessage;
     interact.interactGetPropertySet = [](OfxInteractHandle h, OfxPropertySetHandle* p) -> OfxStatus { *p = reinterpret_cast<OfxPropertySetHandle>(h); return kOfxStatOK; };
     interact.interactRedraw = [](OfxInteractHandle) -> OfxStatus { ++current->redraws; return kOfxStatOK; };
     params.paramDefine = [](OfxParamSetHandle, const char*, const char* name, OfxPropertySetHandle* out) -> OfxStatus { *out = handle(current->definitions[name]); return kOfxStatOK; };
@@ -439,7 +446,7 @@ TEST(ofxStability, toolbarSelectsOutlineAndConsumesClick) {
     CHECK_EQ(pluginMain(kOfxActionCreateInstance,host.effect(),nullptr,nullptr),kOfxStatOK);
     Properties overlay, pen; overlay.pointers[kOfxPropEffectInstance]=host.effect();
     pen.doubles[kOfxInteractPropPixelScale]={1,1};
-    pen.doubles[kOfxInteractPropPenPosition]={40,20}; // L button
+    pen.doubles[kOfxInteractPropPenPosition]={55,20}; // L button
     const void* h=reinterpret_cast<const void*>(handle(overlay));
     CHECK_EQ(brushOverlayMain(kOfxActionCreateInstance,h,nullptr,nullptr),kOfxStatOK);
     CHECK_EQ(brushOverlayMain(kOfxInteractActionPenDown,h,handle(pen),nullptr),kOfxStatOK);
@@ -475,5 +482,24 @@ TEST(ofxStability, guidedModeRendersUnmarkedRegionsAndPersists) {
     CHECK_EQ(pluginMain(kOfxActionCreateInstance,host.effect(),nullptr,nullptr),kOfxStatOK);
     CHECK_EQ(pluginMain(kOfxImageEffectActionRender,host.effect(),handle(host.args),nullptr),kOfxStatOK);
     CHECK(host.output[(40*64+40)*4+3]>0.7f);
+    CHECK_EQ(pluginMain(kOfxActionDestroyInstance,host.effect(),nullptr,nullptr),kOfxStatOK);
+}
+
+TEST(ofxStability, pointLimitWarnsWithoutDiscardingSavedData) {
+    FakeHost host; setModelUsesStrChoice(false);
+    aibgr::BrushStroke full; full.keep=true; full.radius=3;
+    for(size_t i=0;i<aibgr::kMaxBrushPoints;++i) full.points.push_back({double(i),50.0});
+    host.brushData=aibgr::serialiseBrushStrokes({full}); const std::string original=host.brushData;
+    host.brushMode=1;
+    CHECK_EQ(pluginMain(kOfxActionCreateInstance,host.effect(),nullptr,nullptr),kOfxStatOK);
+    Properties overlay, pen; overlay.pointers[kOfxPropEffectInstance]=host.effect();
+    pen.doubles[kOfxInteractPropPenPosition]={400,200};
+    const void* h=reinterpret_cast<const void*>(handle(overlay));
+    CHECK_EQ(brushOverlayMain(kOfxActionCreateInstance,h,nullptr,nullptr),kOfxStatOK);
+    CHECK_EQ(brushOverlayMain(kOfxInteractActionPenDown,h,handle(pen),nullptr),kOfxStatOK);
+    CHECK_EQ(brushOverlayMain(kOfxInteractActionPenUp,h,handle(pen),nullptr),kOfxStatOK);
+    CHECK(host.warning.find("limit reached")!=std::string::npos);
+    CHECK_EQ(host.brushData,original); CHECK_EQ(host.paramWrites,0);
+    CHECK_EQ(brushOverlayMain(kOfxActionDestroyInstance,h,nullptr,nullptr),kOfxStatOK);
     CHECK_EQ(pluginMain(kOfxActionDestroyInstance,host.effect(),nullptr,nullptr),kOfxStatOK);
 }
