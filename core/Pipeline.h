@@ -101,6 +101,7 @@ public:
     void setBrushOverride(const MatteOverride* value) noexcept { brushOverride_ = value; }
     void setSelectionRefiner(MatteRefiner* value) noexcept { selectionRefiner_ = value; }
     MatteRefiner* selectionRefiner() const noexcept { return selectionRefiner_; }
+    void setSelectionOnly(bool value) noexcept { selectionOnly_ = value; }
 
     void setAbortChecker(const AbortChecker* checker) noexcept { abortChecker_ = checker; }
 
@@ -129,6 +130,7 @@ private:
     const MatteOverride* matteOverride_ = nullptr;
     const MatteOverride* brushOverride_ = nullptr;
     MatteRefiner* selectionRefiner_ = nullptr;
+    bool selectionOnly_ = false;
     std::unique_ptr<FallbackKeyMatteSource> fallback_;
     const AbortChecker* abortChecker_ = nullptr;
 

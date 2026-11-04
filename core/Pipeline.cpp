@@ -102,7 +102,7 @@ Result Pipeline::process(const FrameContext& ctx, const PipelineSettings& settin
     // --- Fast paths -------------------------------------------------------
     // A thumbnail render must never touch a model: hosts generate thumbnails constantly while
     // scrubbing the effect list, and loading a 500 MB network for one is pure waste.
-    if (ctx.thumbnailRender || isPassThrough(settings)) {
+    if (ctx.thumbnailRender || isPassThrough(settings) || (selectionOnly_ && !selectionRefiner_)) {
         copyImage(srcStraight, dst);
         stats.totalMs = total.elapsedMs();
         stats.message = ctx.thumbnailRender ? "thumbnail: pass-through" : "pass-through";
@@ -156,10 +156,12 @@ Result Pipeline::process(const FrameContext& ctx, const PipelineSettings& settin
         MatteSource* source = (matteSource_ != nullptr) ? matteSource_ : fallback_.get();
         fallback_->setSettings({effective.fallbackKeyTolerance, effective.fallbackKeySoftness, 4});
         rawMatte_.resize(mw, mh);
-        const Result st = source->acquire(*inferenceImage, rawMatte_);
+        Result st = Result::success();
+        if (selectionOnly_) rawMatte_.fill(0.0f);
+        else st = source->acquire(*inferenceImage, rawMatte_);
         stats.matteSourceMs = t.elapsedMs();
-        stats.matteSourceRan = true;
-        stats.usedFallbackKey = (matteSource_ == nullptr);
+        stats.matteSourceRan = !selectionOnly_;
+        stats.usedFallbackKey = !selectionOnly_ && (matteSource_ == nullptr);
         if (!st.ok()) {
             stats.message = st.toString();
             AIBGR_LOGE("matte source '%s' failed: %s", source->name(), st.message.c_str());
@@ -171,14 +173,14 @@ Result Pipeline::process(const FrameContext& ctx, const PipelineSettings& settin
     }
 
     // --- 5. Processing mode ------------------------------------------------
-    if (effective.processingMode == ProcessingMode::InvertRemoveSubject) {
+    if (!selectionOnly_ && effective.processingMode == ProcessingMode::InvertRemoveSubject) {
         invertMatte(rawMatte_);
     }
     // ProcessingMode::LargestSubjectOnly / AllSubjects are implemented by matte/Components in
     // Phase 5. Until then they behave as Automatic, which is the safe default.
 
     // --- 6. Global matte bias ---------------------------------------------
-    if (effective.shiftMatte != 0.0f) {
+    if (!selectionOnly_ && effective.shiftMatte != 0.0f) {
         shiftMatte(rawMatte_, effective.shiftMatte);
     }
 
@@ -212,7 +214,15 @@ Result Pipeline::process(const FrameContext& ctx, const PipelineSettings& settin
 
     if (selectionRefiner_) {
         const Result selected = selectionRefiner_->refine(*encoded, *finalMatte, effective.matteInvert);
-        if (!selected.ok()) AIBGR_LOGE("guided selection: %s", selected.toString().c_str());
+        if (!selected.ok()) {
+            AIBGR_LOGE("guided selection: %s", selected.toString().c_str());
+            if (selectionOnly_) {
+                copyImage(srcStraight, dst);
+                stats.message = "selection failed: pass-through";
+                stats.totalMs = total.elapsedMs();
+                return Result::success();
+            }
+        }
     }
 
     // Apply manual corrections at full resolution, so thin painted strokes are not

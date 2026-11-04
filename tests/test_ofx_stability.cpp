@@ -62,7 +62,7 @@ struct FakeHost {
     int modelIndex = 0;
     std::string modelValue = "__fallback__";
     std::string guidancePath, brushData, warning;
-    int brushMode = 0, selectionMode = 0, brushBehavior = 0, redraws = 0;
+    int brushMode = 0, selectionMode = 0, brushBehavior = 0, detailRecovery = 0, redraws = 0;
     double brushRadius = 6;
     OfxImageEffectHandle effect() { return reinterpret_cast<OfxImageEffectHandle>(&effectToken); }
     OfxParamSetHandle paramSet() { return reinterpret_cast<OfxParamSetHandle>(&paramToken); }
@@ -93,6 +93,7 @@ OfxStatus getParameterAtTime(OfxParamHandle p, OfxTime time, ...) {
         std::strcmp(name, pname::kGuidancePath) != 0 &&
         std::strcmp(name, pname::kGuidedBrushBehavior) != 0 &&
         std::strcmp(name, pname::kSelectionMode) != 0 &&
+        std::strcmp(name, pname::kBoxDetailRecovery) != 0 &&
         std::strcmp(name, pname::kBrushMode) != 0 &&
         std::strcmp(name, pname::kBrushRadius) != 0 &&
         std::strcmp(name, pname::kBrushData) != 0) return kOfxStatErrUnknown;
@@ -104,6 +105,8 @@ OfxStatus getParameterAtTime(OfxParamHandle p, OfxTime time, ...) {
         int* result = va_arg(args, int*); *result = current->brushBehavior;
     } else if (std::strcmp(name, pname::kSelectionMode) == 0) {
         int* result = va_arg(args, int*); *result = current->selectionMode;
+    } else if (std::strcmp(name, pname::kBoxDetailRecovery) == 0) {
+        int* result = va_arg(args, int*); *result = current->detailRecovery;
     } else if (std::strcmp(name, pname::kBrushMode) == 0) {
         int* result = va_arg(args, int*); *result = current->brushMode;
     } else if (std::strcmp(name, pname::kBrushRadius) == 0) {
@@ -138,11 +141,12 @@ OfxStatus setParameterAtTime(OfxParamHandle p, OfxTime, ...) {
 }
 OfxStatus setParameter(OfxParamHandle p, ...) {
     const char* name = reinterpret_cast<const char*>(p);
-    if (std::strcmp(name, pname::kBrushData) && std::strcmp(name, pname::kBrushMode) && std::strcmp(name, pname::kSelectionMode) && std::strcmp(name, pname::kGuidedBrushBehavior)) return kOfxStatErrUnknown;
+    if (std::strcmp(name, pname::kBrushData) && std::strcmp(name, pname::kBrushMode) && std::strcmp(name, pname::kSelectionMode) && std::strcmp(name, pname::kBoxDetailRecovery) && std::strcmp(name, pname::kGuidedBrushBehavior)) return kOfxStatErrUnknown;
     va_list args; va_start(args, p);
     if (!std::strcmp(name, pname::kBrushData)) {
         const char* value = va_arg(args, const char*); current->brushData = value ? value : "";
     } else if (!std::strcmp(name, pname::kBrushMode)) current->brushMode=va_arg(args,int);
+    else if (!std::strcmp(name, pname::kBoxDetailRecovery)) current->detailRecovery=va_arg(args,int);
     else current->selectionMode=va_arg(args,int);
     va_end(args);
     ++current->paramWrites;
@@ -207,7 +211,7 @@ FakeHost::FakeHost() {
             std::strcmp(name, pname::kShiftMatte) && std::strcmp(name, pname::kFallbackKeyTolerance) &&
             std::strcmp(name, pname::kFallbackKeySoftness) && std::strcmp(name, pname::kModel) &&
             std::strcmp(name, pname::kGuidancePath) && std::strcmp(name, pname::kBrushData) &&
-            std::strcmp(name, pname::kBrushMode) && std::strcmp(name, pname::kBrushRadius) && std::strcmp(name, pname::kSelectionMode) && std::strcmp(name, pname::kGuidedBrushBehavior)) return kOfxStatErrUnknown;
+            std::strcmp(name, pname::kBrushMode) && std::strcmp(name, pname::kBrushRadius) && std::strcmp(name, pname::kSelectionMode) && std::strcmp(name, pname::kBoxDetailRecovery) && std::strcmp(name, pname::kGuidedBrushBehavior)) return kOfxStatErrUnknown;
         *out = reinterpret_cast<OfxParamHandle>(const_cast<char*>(name)); return kOfxStatOK;
     };
     params.paramGetValueAtTime = getParameterAtTime;
@@ -445,17 +449,12 @@ TEST(ofxStability, viewerBrushPenActionsPersistAndRender) {
     CHECK_EQ(pluginMain(kOfxActionDestroyInstance, host.effect(), nullptr, nullptr), kOfxStatOK);
 }
 
-TEST(ofxStability, toolbarSelectsOutlineAndConsumesClick) {
-    FakeHost host; setModelUsesStrChoice(false);
+TEST(ofxStability, inspectorOutlineStillWorks) {
+    FakeHost host; setModelUsesStrChoice(false); host.brushMode=3; host.selectionMode=1;
     CHECK_EQ(pluginMain(kOfxActionCreateInstance,host.effect(),nullptr,nullptr),kOfxStatOK);
     Properties overlay, pen; overlay.pointers[kOfxPropEffectInstance]=host.effect();
-    pen.doubles[kOfxInteractPropPixelScale]={1,1};
-    pen.doubles[kOfxInteractPropPenPosition]={55,20}; // L button
     const void* h=reinterpret_cast<const void*>(handle(overlay));
     CHECK_EQ(brushOverlayMain(kOfxActionCreateInstance,h,nullptr,nullptr),kOfxStatOK);
-    CHECK_EQ(brushOverlayMain(kOfxInteractActionPenDown,h,handle(pen),nullptr),kOfxStatOK);
-    CHECK_EQ(brushOverlayMain(kOfxInteractActionPenUp,h,handle(pen),nullptr),kOfxStatOK);
-    CHECK_EQ(host.brushMode,3); CHECK_EQ(host.selectionMode,1); CHECK(host.brushData.empty());
     pen.doubles[kOfxInteractPropPenPosition]={300,100};
     CHECK_EQ(brushOverlayMain(kOfxInteractActionPenDown,h,handle(pen),nullptr),kOfxStatOK);
     pen.doubles[kOfxInteractPropPenPosition]={400,100};
@@ -463,7 +462,7 @@ TEST(ofxStability, toolbarSelectsOutlineAndConsumesClick) {
     pen.doubles[kOfxInteractPropPenPosition]={400,200};
     CHECK_EQ(brushOverlayMain(kOfxInteractActionPenUp,h,handle(pen),nullptr),kOfxStatOK);
     std::vector<aibgr::BrushStroke> strokes; CHECK(aibgr::parseBrushStrokes(host.brushData,strokes));
-    CHECK_EQ(strokes.size(),size_t(1)); CHECK(strokes[0].outline);
+    CHECK_EQ(strokes.size(),size_t(1)); if(!strokes.empty()) CHECK(strokes[0].outline);
     CHECK_EQ(brushOverlayMain(kOfxActionDestroyInstance,h,nullptr,nullptr),kOfxStatOK);
     CHECK_EQ(pluginMain(kOfxActionDestroyInstance,host.effect(),nullptr,nullptr),kOfxStatOK);
 }
@@ -575,14 +574,14 @@ TEST(ofxStability, realAiBoxModeRendersWhenModelsProvided) {
     std::vector<float> pixels(size_t(1024)*574*4); std::ifstream file(raw,std::ios::binary);
     file.read(reinterpret_cast<char*>(pixels.data()),static_cast<std::streamsize>(pixels.size()*sizeof(float)));
     CHECK(file.good()); if(!file.good()) return;
-    FakeHost host; setModelUsesStrChoice(false); host.selectionMode=2;
+    FakeHost host; setModelUsesStrChoice(false); host.selectionMode=2; host.modelIndex=1;
     for(int y=0;y<64;++y) for(int x=0;x<64;++x) for(int c=0;c<4;++c)
         host.source[(y*64+x)*4+c]=pixels[(size_t(y)*574/64*1024+size_t(x)*1024/64)*4+c];
     host.brushData=aibgr::serialiseBrushStrokes({{true,1,{{6.25,0.5},{51.5,63.5}},false,true}});
     CHECK_EQ(pluginMain(kOfxActionCreateInstance,host.effect(),nullptr,nullptr),kOfxStatOK);
     CHECK_EQ(pluginMain(kOfxImageEffectActionRender,host.effect(),handle(host.args),nullptr),kOfxStatOK);
     PluginInstance* instance=findInstance(host.effect()); CHECK(instance!=nullptr);
-    if(instance) CHECK(instance->pipeline().selectionRefiner()!=nullptr);
+    if(instance) { CHECK(instance->pipeline().selectionRefiner()!=nullptr); CHECK(instance->pipeline().matteSource()==nullptr); }
     CHECK(host.output[(28*64+30)*4+3]>0.5f);
     CHECK(host.output[(50*64+2)*4+3]<0.5f);
     CHECK_EQ(host.paramWrites,0);
@@ -596,14 +595,77 @@ TEST(ofxStability, aiToolbarButtonsChooseAddAndSubtract) {
     pen.doubles[kOfxInteractPropPixelScale]={1,1};
     const void* h=reinterpret_cast<const void*>(handle(overlay));
     CHECK_EQ(brushOverlayMain(kOfxActionCreateInstance,h,nullptr,nullptr),kOfxStatOK);
-    pen.doubles[kOfxInteractPropPenPosition]={396,20}; // A
+    pen.doubles[kOfxInteractPropPenPosition]={18,54}; // ADD BOX
     CHECK_EQ(brushOverlayMain(kOfxInteractActionPenDown,h,handle(pen),nullptr),kOfxStatOK);
     CHECK_EQ(brushOverlayMain(kOfxInteractActionPenUp,h,handle(pen),nullptr),kOfxStatOK);
     CHECK_EQ(host.brushMode,4); CHECK_EQ(host.selectionMode,2); CHECK(host.brushData.empty());
-    pen.doubles[kOfxInteractPropPenPosition]={438,20}; // D
+    pen.doubles[kOfxInteractPropPenPosition]={138,54}; // REMOVE BOX
     CHECK_EQ(brushOverlayMain(kOfxInteractActionPenDown,h,handle(pen),nullptr),kOfxStatOK);
     CHECK_EQ(brushOverlayMain(kOfxInteractActionPenUp,h,handle(pen),nullptr),kOfxStatOK);
     CHECK_EQ(host.brushMode,5); CHECK_EQ(host.selectionMode,2); CHECK(host.brushData.empty());
+    pen.doubles[kOfxInteractPropPenPosition]={258,54}; // DETAIL + toggle
+    CHECK_EQ(brushOverlayMain(kOfxInteractActionPenDown,h,handle(pen),nullptr),kOfxStatOK);
+    CHECK_EQ(brushOverlayMain(kOfxInteractActionPenUp,h,handle(pen),nullptr),kOfxStatOK);
+    CHECK_EQ(host.detailRecovery,1); CHECK(host.brushData.empty());
+    host.brushData=aibgr::serialiseBrushStrokes({{true,1,{{10,10},{20,20}},false,true}, {true,1,{{30,30},{40,40}},false,true}});
+    pen.doubles[kOfxInteractPropPenPosition]={18,18}; // UNDO
+    CHECK_EQ(brushOverlayMain(kOfxInteractActionPenDown,h,handle(pen),nullptr),kOfxStatOK);
+    CHECK_EQ(brushOverlayMain(kOfxInteractActionPenUp,h,handle(pen),nullptr),kOfxStatOK);
+    std::vector<aibgr::BrushStroke> saved; CHECK(aibgr::parseBrushStrokes(host.brushData,saved)); CHECK_EQ(saved.size(),size_t(1));
+    pen.doubles[kOfxInteractPropPenPosition]={138,18}; // CLEAR
+    CHECK_EQ(brushOverlayMain(kOfxInteractActionPenDown,h,handle(pen),nullptr),kOfxStatOK);
+    CHECK_EQ(brushOverlayMain(kOfxInteractActionPenUp,h,handle(pen),nullptr),kOfxStatOK);
+    CHECK(aibgr::parseBrushStrokes(host.brushData,saved)); CHECK(saved.empty());
+    pen.doubles[kOfxInteractPropPenPosition]={258,18}; // OFF
+    CHECK_EQ(brushOverlayMain(kOfxInteractActionPenDown,h,handle(pen),nullptr),kOfxStatOK);
+    CHECK_EQ(brushOverlayMain(kOfxInteractActionPenUp,h,handle(pen),nullptr),kOfxStatOK);
+    CHECK_EQ(host.brushMode,0);
     CHECK_EQ(brushOverlayMain(kOfxActionDestroyInstance,h,nullptr,nullptr),kOfxStatOK);
+    CHECK_EQ(pluginMain(kOfxActionDestroyInstance,host.effect(),nullptr,nullptr),kOfxStatOK);
+}
+
+TEST(ofxStability, newEffectAndEmptyBoxModeDoNotApplyAutomaticModel) {
+    FakeHost host; setModelUsesStrChoice(false); host.selectionMode=3; host.modelIndex=1;
+    CHECK(defineParameters(host.paramSet(), {{"u2netp", "U2NetP"}}).ok());
+    CHECK_EQ(host.definitions[pname::kSelectionMode].ints[kOfxParamPropDefault][0],3);
+    CHECK_EQ(host.definitions[pname::kBrushMode].ints[kOfxParamPropDefault][0],4);
+    CHECK_EQ(pluginMain(kOfxActionCreateInstance,host.effect(),nullptr,nullptr),kOfxStatOK);
+    CHECK_EQ(pluginMain(kOfxImageEffectActionRender,host.effect(),handle(host.args),nullptr),kOfxStatOK);
+    CHECK(host.output==host.source);
+    PluginInstance* instance=findInstance(host.effect()); CHECK(instance!=nullptr);
+    if(instance) CHECK(instance->pipeline().matteSource()==nullptr);
+    host.selectionMode=2; std::fill(host.output.begin(),host.output.end(),0);
+    CHECK_EQ(pluginMain(kOfxImageEffectActionRender,host.effect(),handle(host.args),nullptr),kOfxStatOK);
+    CHECK(host.output==host.source);
+    if(instance) CHECK(instance->pipeline().matteSource()==nullptr);
+    CHECK_EQ(pluginMain(kOfxActionDestroyInstance,host.effect(),nullptr,nullptr),kOfxStatOK);
+}
+
+TEST(ofxStability, viewportToolbarStaysInViewWhileZoomedAndPanned) {
+    double model[16]={1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1};
+    double projection[16]={0.005,0,0,0, 0,2.0/300,0,0, 0,0,1,0, 0,-5.0/3,0,1};
+    int viewport[4]={12,20,800,600}; double x=0,y=0,sx=0,sy=0;
+    CHECK(toolbarViewportTransform(model,projection,viewport,x,y,sx,sy));
+    CHECK_NEAR(x,-196,1e-8); CHECK_NEAR(y,104,1e-8);
+    CHECK_NEAR(sx,0.5,1e-8); CHECK_NEAR(sy,0.5,1e-8);
+    model[12]=30; model[13]=-20;
+    CHECK(toolbarViewportTransform(model,projection,viewport,x,y,sx,sy));
+    CHECK_NEAR(x,-226,1e-8); CHECK_NEAR(y,124,1e-8);
+    projection[0]=-0.005;
+    CHECK(!toolbarViewportTransform(model,projection,viewport,x,y,sx,sy));
+}
+
+TEST(ofxStability, missingBoxModelPassesThroughInsteadOfApplyingOldEffect) {
+    const auto dir=aibgr::joinPath(workspaceDir(),"models");
+    if(aibgr::fileExists(aiRuntimePath()) &&
+       aibgr::fileExists(aibgr::joinPath(dir,"efficientsam_ti_encoder.onnx")) &&
+       aibgr::fileExists(aibgr::joinPath(dir,"efficientsam_ti_decoder.onnx"))) return;
+    FakeHost host; setModelUsesStrChoice(false); host.selectionMode=2; host.modelIndex=1;
+    host.brushData=aibgr::serialiseBrushStrokes({{true,1,{{8,8},{55,55}},false,true}});
+    CHECK_EQ(pluginMain(kOfxActionCreateInstance,host.effect(),nullptr,nullptr),kOfxStatOK);
+    CHECK_EQ(pluginMain(kOfxImageEffectActionRender,host.effect(),handle(host.args),nullptr),kOfxStatOK);
+    CHECK(host.source==host.output);
+    PluginInstance* instance=findInstance(host.effect()); CHECK(instance!=nullptr);
+    if(instance) { CHECK(instance->pipeline().matteSource()==nullptr); CHECK(instance->pipeline().selectionRefiner()==nullptr); }
     CHECK_EQ(pluginMain(kOfxActionDestroyInstance,host.effect(),nullptr,nullptr),kOfxStatOK);
 }

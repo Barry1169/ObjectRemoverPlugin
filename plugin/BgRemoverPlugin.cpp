@@ -409,13 +409,14 @@ Result PluginInstance::render(double time, OfxPropertySetHandle inArgs) {
     }
 
     std::string guidancePath, brushData;
-    int selectionMode = 0, brushBehavior = 0;
+    int selectionMode = 0, brushBehavior = 0, recoverDetail = 0;
     if (paramSet_) {
         const ParamReader p(bridge.params(), paramSet_);
         p.getString(pname::kGuidancePath, time, guidancePath);
         p.getString(pname::kBrushData, time, brushData);
         p.getInt(pname::kSelectionMode, time, selectionMode);
         p.getInt(pname::kGuidedBrushBehavior, time, brushBehavior);
+        p.getInt(pname::kBoxDetailRecovery, time, recoverDetail);
     }
 
     Result outcome = Result::success();
@@ -434,7 +435,12 @@ Result PluginInstance::render(double time, OfxPropertySetHandle inArgs) {
         if (!read.ok()) {
             outcome = read;
         } else {
-            const bool useAi = settings.model == ModelId::SmallMatte && !isPassThrough(settings) && !ctx.thumbnailRender;
+            std::vector<BrushStroke> strokes;
+            if (!parseBrushStrokes(brushData, strokes)) AIBGR_LOGE("invalid saved brush data; ignoring strokes");
+            const bool hasBox = std::any_of(strokes.begin(),strokes.end(),[](const BrushStroke& s){return s.box && s.keep;});
+            // Ready and empty box modes must never run either the old AI or colour key.
+            if (selectionMode == 3 || (selectionMode == 2 && !hasBox)) settings.enable = false;
+            const bool useAi = selectionMode != 2 && selectionMode != 3 && settings.model == ModelId::SmallMatte && !isPassThrough(settings) && !ctx.thumbnailRender;
             if (useAi && !aiSegmenter_ && !aiLoadAttempted_) {
                 aiLoadAttempted_ = true;
                 auto candidate = std::make_unique<U2NetSegmenter>();
@@ -454,13 +460,12 @@ Result PluginInstance::render(double time, OfxPropertySetHandle inArgs) {
                 else AIBGR_LOGE("guidance PNG ignored: %s (%s)", guidancePath.c_str(), guide.toString().c_str());
             }
             pipeline_->setMatteOverride(guide.ok() && guidance_.ready() ? &guidance_ : nullptr);
-            std::vector<BrushStroke> strokes;
-            if (!parseBrushStrokes(brushData, strokes)) AIBGR_LOGE("invalid saved brush data; ignoring strokes");
+            pipeline_->setSelectionOnly(false);
             if (selectionMode == 1 && !strokes.empty()) {
                 selection_.configure(strokes, ctx);
                 pipeline_->setSelectionRefiner(&selection_);
-            } else if (selectionMode == 2 && std::any_of(strokes.begin(),strokes.end(),[](const BrushStroke& s){return s.box && s.keep;})) {
-                if (!boxLoadAttempted_ && !ctx.thumbnailRender) {
+            } else if (selectionMode == 2 && hasBox) {
+                if (!boxLoadAttempted_ && !ctx.thumbnailRender && !isPassThrough(settings)) {
                     boxLoadAttempted_=true;
                     const auto models=joinPath(workspaceDir(),"models");
                     const Result loaded=boxSelection_.open(aiRuntimePath(),joinPath(models,"efficientsam_ti_encoder.onnx"),joinPath(models,"efficientsam_ti_decoder.onnx"));
@@ -468,8 +473,8 @@ Result PluginInstance::render(double time, OfxPropertySetHandle inArgs) {
                     if(boxLoaded_) AIBGR_LOGI("AI box selection loaded (EfficientSAM-Ti CPU)");
                     else AIBGR_LOGE("AI box selection unavailable: %s",loaded.toString().c_str());
                 }
-                if(boxLoaded_) { boxSelection_.configure(strokes,ctx); pipeline_->setSelectionRefiner(&boxSelection_); }
-                else pipeline_->setSelectionRefiner(nullptr);
+                if(boxLoaded_) { boxSelection_.configure(strokes,ctx,recoverDetail != 0); pipeline_->setSelectionRefiner(&boxSelection_); pipeline_->setSelectionOnly(true); }
+                else { pipeline_->setSelectionRefiner(nullptr); settings.enable=false; }
             } else pipeline_->setSelectionRefiner(nullptr);
             brush_.configure(std::move(strokes), ctx);
             pipeline_->setBrushOverride(brushData.empty() || selectionMode == 2 || (selectionMode == 1 && brushBehavior == 1) ? nullptr : &brush_);

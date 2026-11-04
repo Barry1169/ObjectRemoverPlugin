@@ -100,7 +100,7 @@ struct BoxSelector::Impl {
         shape(embedding,{1,256,64,64},ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT);
         embeddingHash=hash; embeddingValid=true;
     }
-    void calculate(const FloatImage& image,const std::vector<BrushStroke>& strokes,const FrameContext& ctx,bool inverted,Matte& matte) {
+    void calculate(const FloatImage& image,const std::vector<BrushStroke>& strokes,const FrameContext& ctx,bool inverted,bool recoverDetail,Matte& matte) {
         encode(image); const int w=scaled.width(),h=scaled.height();
         uint64_t hash=hashBytes(embeddingHash,&ctx.renderScaleX,sizeof(ctx.renderScaleX));
         hash=hashBytes(hash,&ctx.renderScaleY,sizeof(ctx.renderScaleY)); hash=hashBytes(hash,&ctx.pixelAspectX,sizeof(ctx.pixelAspectX));
@@ -108,7 +108,7 @@ struct BoxSelector::Impl {
         const int iw=image.width(),ih=image.height(); hash=hashBytes(hash,&iw,sizeof(iw)); hash=hashBytes(hash,&ih,sizeof(ih));
         // Full-resolution pixels influence edge-aware upsampling even when the embedding is unchanged.
         hash=hashBytes(hash,image.data(),image.floatCount()*sizeof(float));
-        hash=hashBytes(hash,&inverted,sizeof(inverted));
+        hash=hashBytes(hash,&inverted,sizeof(inverted)); hash=hashBytes(hash,&recoverDetail,sizeof(recoverDetail));
         const std::string key=serialiseBrushStrokes(strokes); hash=hashBytes(hash,key.data(),key.size());
         if(maskValid && hash==maskHash && full.width()==iw && full.height()==ih) { std::copy(full.data(),full.data()+full.floatCount(),matte.data()); return; }
         const double sx=ctx.renderScaleX/std::max(ctx.pixelAspectX,1e-8),sy=ctx.renderScaleY;
@@ -137,9 +137,25 @@ struct BoxSelector::Impl {
             if(!pred || !scores || !std::isfinite(scores[0]) || !std::isfinite(scores[1]) || !std::isfinite(scores[2])) throw std::runtime_error("invalid box output");
             int best=0; for(int i=1;i<3;++i) if(scores[i]>scores[best]) best=i;
             const size_t plane=size_t(w)*h; const float* result=pred+plane*best;
+            // SAM exposes three alternate hypotheses. For opt-in detail recovery, add only
+            // the most similar reasonably scored alternate: wildly different objects are not
+            // merged. This can still retain background, so it remains an explicit user choice.
+            int alternate=-1; double bestOverlap=0.45;
+            if (recoverDetail && s.keep) for(int candidate=0;candidate<3;++candidate) {
+                if(candidate==best || scores[candidate]<scores[best]-0.4f) continue;
+                size_t intersection=0, uni=0; const float* other=pred+plane*candidate;
+                for(size_t i=0;i<plane;++i) {
+                    if(!std::isfinite(result[i]) || !std::isfinite(other[i])) throw std::runtime_error("non-finite selection output");
+                    const bool a=result[i]>0,b=other[i]>0; intersection+=a&&b; uni+=a||b;
+                }
+                const double overlap=uni ? double(intersection)/double(uni) : 0;
+                if(overlap>bestOverlap) {bestOverlap=overlap; alternate=candidate;}
+            }
             for(int yy=0;yy<h;++yy) for(int xx=0;xx<w;++xx) {
-                const float v=result[size_t(h-1-yy)*w+xx]; if(!std::isfinite(v)) throw std::runtime_error("non-finite selection output");
-                if(v>0) small.at(xx,yy)=s.keep ? 1.0f : 0.0f;
+                const size_t i=size_t(h-1-yy)*w+xx; const float v=result[i];
+                if(!std::isfinite(v)) throw std::runtime_error("non-finite selection output");
+                const bool extra=alternate>=0 && pred[plane*alternate+i]>0;
+                if(v>0 || extra) small.at(xx,yy)=s.keep ? 1.0f : 0.0f;
             }
         }
         if(!hasAdd) throw std::runtime_error("draw an add box first");
@@ -154,11 +170,11 @@ Result BoxSelector::open(const std::string& runtime,const std::string& encoder,c
         auto p=std::make_unique<Impl>(); p->load(runtime,encoder,decoder); impl_=std::move(p); return Result::success();
     } catch(const std::exception& e){return Result::fail(Status::BackendError,e.what());}
 }
-void BoxSelector::configure(std::vector<BrushStroke> strokes,FrameContext ctx) { strokes_=std::move(strokes);ctx_=ctx; }
+void BoxSelector::configure(std::vector<BrushStroke> strokes,FrameContext ctx,bool recoverDetail) { strokes_=std::move(strokes);ctx_=ctx;recoverDetail_=recoverDetail; }
 Result BoxSelector::refine(const FloatImage& image,Matte& matte,bool inverted) {
     if(!impl_) return Result::fail(Status::InvalidState,"box model is not loaded");
     if(image.empty() || image.width()!=matte.width() || image.height()!=matte.height()) return Result::fail(Status::InvalidArgument,"image/matte mismatch");
-    try { impl_->calculate(image,strokes_,ctx_,inverted,matte); return Result::success(); }
+    try { impl_->calculate(image,strokes_,ctx_,inverted,recoverDetail_,matte); return Result::success(); }
     catch(const std::exception& e) { return Result::fail(Status::BackendError,e.what()); }
 }
 void BoxSelector::clearCache() noexcept { if(impl_) { impl_->maskValid=false;impl_->embeddingValid=false; if(impl_->embedding){impl_->api->ReleaseValue(impl_->embedding);impl_->embedding=nullptr;} impl_->scaled.release();impl_->small.release();impl_->full.release();std::vector<float>().swap(impl_->input); } }

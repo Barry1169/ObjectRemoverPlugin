@@ -22,6 +22,17 @@ TEST(boxSelection, realTreeImageWhenProvided) {
     selector.configure({box},ctx); Matte result(1024,574); result.fill(0.5f);
     auto r=selector.refine(image,result,false); CHECK_MSG(r.ok(),r.toString()); if(!r.ok())return;
     CHECK(result.at(500,250)>0.9f); CHECK(result.at(40,400)<0.1f); CHECK(result.at(300,125)>0.9f);
+    // Alternate hypothesis recovers part of the missing left foliage on this supplied image.
+    selector.configure({box},ctx,true); Matte detail(1024,574); detail.fill(0.5f);
+    CHECK(selector.refine(image,detail,false).ok());
+    size_t gained=0, foliage=0, lost=0;
+    for(int y=0;y<574;++y) for(int x=0;x<1024;++x) {
+        if(detail.at(x,y)>result.at(x,y)+0.1f) { ++gained; if(x>=120&&x<330&&y>=280&&y<450) ++foliage; }
+        if(detail.at(x,y)+0.001f<result.at(x,y)) ++lost;
+    }
+    CHECK(gained>100); CHECK(foliage>100); CHECK_EQ(lost,size_t(0)); CHECK(detail.at(40,400)<0.1f);
+    selector.configure({box},ctx); Matte normalAgain(1024,574);
+    CHECK(selector.refine(image,normalAgain,false).ok()); CHECK_NEAR(normalAgain.at(500,250),result.at(500,250),1e-5);
     BrushStroke removeLeft{false,1,{{249,14},{366,164}},false,true};
     selector.configure({box,removeLeft},ctx); Matte removed(1024,574); removed.fill(0.5f);
     CHECK(selector.refine(image,removed,false).ok());

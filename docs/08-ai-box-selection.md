@@ -16,29 +16,46 @@ rectangles. It does not track moving objects.
 - Close Resolve before installing a new plugin, back up the existing bundle and
   save a separate project copy. Reopen Resolve with the effect selected and
   Open FX Overlay enabled.
-- Click **A** (add box) at the right end of the on-screen toolbar, or choose
-  **AI add box** in Viewer Brush. Drag a loose rectangle around the whole desired
-  object and release. This automatically switches Viewer Selection Method to
-  **AI box selection**. The result replaces the AI/key matte; existing brush
-  strokes are not used in this mode. No external GIMP, PNG or mask file is needed.
-- Draw further **A** boxes around missed objects to add them. **D** draws a box
-  whose predicted object is removed from the current selection. These operations
-  are applied in order. Boxes do not remain drawn after release. **U** undoes the
-  last saved action; **X** clears all saved actions, including older brush strokes.
-  Up to 32 boxes are accepted.
-- Inspect Output → Matte Only or Foreground Only. Use a disposable project and
-  check save/reopen, zoom, proxy/full-resolution alignment and final output. This
-  interaction and model have not yet been tested in Windows Resolve. Different
-  bounding boxes or overlapping objects can produce very different masks.
+- A newly added effect starts in **Ready (no automatic removal)**: the image is
+  unchanged and neither the legacy U2NetP model nor the colour key is run. **AI add
+  box** is the default viewer tool. Click **ADD BOX** in the toolbar if necessary,
+  then drag a loose rectangle around the object and release. The first box activates
+  **AI box selection** and runs EfficientSAM; there is no U2NetP/key base matte in
+  this mode. No external editor or file is needed. Until a valid add box exists,
+  including after clearing all boxes, the image remains unchanged.
+- The viewer toolbar has labelled **ADD BOX**, **REMOVE BOX**, **DETAIL OFF/ON**,
+  **UNDO**, **CLEAR**, and **OFF** buttons. The yellow border marks a selected tool
+  or enabled detail recovery. **OFF** stops drawing but does not disable the effect.
+  The bar is positioned relative to the viewport when the host supplies compatible
+  OpenGL matrices; otherwise it falls back to the source image corner. If it is not
+  visible, zoom out/fit, enable Open FX Overlay, or use the Inspector controls.
+- Additional add boxes union predictions; remove boxes subtract predictions in order.
+  A box is a prompt, not a clipping boundary. Boxes disappear on release. **UNDO**
+  removes the last action; **CLEAR** deletes all saved actions including old strokes.
+  Up to 32 boxes are accepted. Old manual/guided brush tools remain in the Inspector.
+- **DETAIL ON** (also **AI Box: Recover More Detail** in the Inspector) tries the
+  closest alternate AI mask for each add box and unions it with the best prediction.
+  On the supplied tree test image it recovers part of the missing left foliage, but
+  may retain sky or other unwanted areas and is not guaranteed to recover thin
+  branches. It is off by default and can be switched off without changing boxes.
+- Inspect Output → Matte Only or Foreground Only. Check zoom, project save/reopen,
+  proxy/full-resolution alignment and final output in Resolve; the revised toolbar
+  and detail mode have not yet been tested in Windows Resolve.
 
-The model runs on CPU. The image embedding is cached per effect instance and is
-reused while the input pixels remain unchanged; changing frames or input pixels
-requires re-encoding. Model output is at a maximum 1024-pixel long edge and is
-edge-aware upscaled. It has no temporal tracking. If the model or runtime is
-missing or inference fails, the existing AI/key matte is used and the error is in
-`log.txt`. `Retry AI Load` retries missing models on the next render. The tool is
-not a promptable matting engine and cannot promise hair-thin detail or perfect
-foreground/background separation.
+The model runs on CPU. The embedding is cached per effect instance and reused while
+the input pixels remain unchanged; changing frames requires re-encoding. Model output
+is at most 1024 pixels on its long edge and edge-aware upscaled. It has no motion
+tracking. If the model/runtime is missing or inference fails, box mode passes the
+original frame through unchanged and records the error in `log.txt`; **Retry AI Load**
+retries loading on the next render. The experimental detail mode can produce false
+positives or fail to recover branches.
+
+The legacy automatic U2NetP/key modes are still available explicitly under Viewer
+Selection Method; the **Automatic Model (legacy)** setting applies only to those
+modes. Its value does not make U2NetP run in Ready or AI box selection mode.
+Existing saved explicit choice indices remain unchanged, but some hosts may omit
+parameters saved at their old defaults and use new defaults when reloading a project.
+Back up projects and verify existing instances after updating.
 
 Projects containing boxes use a new `AIBGR4` storage format. Older builds cannot
 read it, so keep a separate backup before downgrading. Existing project parameter

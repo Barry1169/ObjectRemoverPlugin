@@ -23,8 +23,29 @@
 #endif
 
 namespace aibgr::ofx {
+bool toolbarViewportTransform(const double model[16], const double proj[16],
+                              const int viewport[4], double& x, double& y,
+                              double& sx, double& sy) noexcept {
+    if (viewport[2]<=0 || viewport[3]<=0) return false;
+    double matrix[16]{};
+    for(int col=0;col<4;++col) for(int row=0;row<4;++row)
+        for(int k=0;k<4;++k) matrix[col*4+row]+=proj[k*4+row]*model[col*4+k];
+    const double q=matrix[15];
+    if(!std::isfinite(q) || std::abs(q)<1e-12 || std::abs(matrix[3])>1e-12 || std::abs(matrix[7])>1e-12) return false;
+    const double a=viewport[2]*0.5*matrix[0]/q, b=viewport[2]*0.5*matrix[4]/q;
+    const double c=viewport[3]*0.5*matrix[1]/q, d=viewport[3]*0.5*matrix[5]/q;
+    if(!std::isfinite(a)||!std::isfinite(b)||!std::isfinite(c)||!std::isfinite(d)||
+       a<=0||d<=0||std::abs(b)>a*0.001||std::abs(c)>d*0.001) return false;
+    const double px=viewport[0]+viewport[2]*0.5*(matrix[12]/q+1.0);
+    const double py=viewport[1]+viewport[3]*0.5*(matrix[13]/q+1.0);
+    const double tx=(viewport[0]+8.0-px)/a, ty=(viewport[1]+8.0-py)/d;
+    const double tsx=1/a, tsy=1/d;
+    if(!std::isfinite(tx)||!std::isfinite(ty)||tsx>1000||tsy>1000) return false;
+    x=tx; y=ty; sx=tsx; sy=tsy; return true;
+}
 namespace {
-struct OverlayState { std::mutex mutex; bool dragging = false; bool buttonDown = false; bool overflow = false; BrushStroke current; };
+struct Toolbar { double x=0, y=0, sx=1, sy=1; };
+struct OverlayState { std::mutex mutex; bool dragging = false; bool buttonDown = false; bool overflow = false; bool toolbarValid = false; Toolbar toolbar; BrushStroke current; };
 
 bool readStrokes(OfxParamSetHandle params, double time, std::vector<BrushStroke>& strokes) {
     const ParamReader p(HostBridge::instance().params(), params);
@@ -54,6 +75,8 @@ struct Gl {
     using Width = void (AIBGR_GL_CALL*)(float);
     using Push = void (AIBGR_GL_CALL*)(unsigned int);
     using Disable = void (AIBGR_GL_CALL*)(unsigned int);
+    using GetDouble = void (AIBGR_GL_CALL*)(unsigned int, double*);
+    using GetInt = void (AIBGR_GL_CALL*)(unsigned int, int*);
 #if defined(_WIN32)
     HMODULE library = nullptr;
 #else
@@ -61,7 +84,7 @@ struct Gl {
 #endif
     GetContext getContext = nullptr; Begin begin = nullptr; End end = nullptr;
     Vertex vertex = nullptr; Colour colour = nullptr; Width width = nullptr; Push push = nullptr; End pop = nullptr;
-    Disable disable = nullptr;
+    Disable disable = nullptr; GetDouble getDouble = nullptr; GetInt getInt = nullptr;
     Gl() {
 #if defined(_WIN32)
         library = LoadLibraryW(L"opengl32.dll");
@@ -76,6 +99,7 @@ struct Gl {
         vertex = reinterpret_cast<Vertex>(sym("glVertex2d")); colour = reinterpret_cast<Colour>(sym("glColor4f"));
         width = reinterpret_cast<Width>(sym("glLineWidth")); push = reinterpret_cast<Push>(sym("glPushAttrib"));
         pop = reinterpret_cast<End>(sym("glPopAttrib")); disable = reinterpret_cast<Disable>(sym("glDisable"));
+        getDouble = reinterpret_cast<GetDouble>(sym("glGetDoublev")); getInt = reinterpret_cast<GetInt>(sym("glGetIntegerv"));
     }
     ~Gl() {
 #if defined(_WIN32)
@@ -86,7 +110,6 @@ struct Gl {
     }
     bool usable() const { return getContext && getContext() && begin && end && vertex && colour && width && push && pop && disable; }
 };
-struct Toolbar { double x, y, sx, sy; };
 bool toolbarGeometry(OfxImageEffectHandle effect, double time, const Props& args, const Props& props, Toolbar& bar) {
     auto* fx=HostBridge::instance().effect();
     if (!fx || !fx->clipGetHandle || !fx->clipGetRegionOfDefinition) return false;
@@ -100,43 +123,78 @@ bool toolbarGeometry(OfxImageEffectHandle effect, double time, const Props& args
         rod.x2<=rod.x1 || rod.y2<=rod.y1 || bar.sx>1000 || bar.sy>1000) return false;
     bar.x=rod.x1+8*bar.sx; bar.y=rod.y1+8*bar.sy; return true;
 }
+// Prefer the actual viewport origin instead of the image corner. At high zoom the image
+// corner is often off screen. Cache this geometry at Draw, where a GL context is available,
+// and reuse it for hit testing. Fall back to the source ROD if the host lacks legacy GL.
+bool viewportToolbar(Toolbar& bar) {
+    static Gl gl;
+    if (!gl.usable() || !gl.getDouble || !gl.getInt) return false;
+    double model[16]{}, proj[16]{}; int viewport[4]{};
+    gl.getDouble(0x0BA6u, model); // GL_MODELVIEW_MATRIX
+    gl.getDouble(0x0BA7u, proj);  // GL_PROJECTION_MATRIX
+    gl.getInt(0x0BA2u, viewport); // GL_VIEWPORT
+    return toolbarViewportTransform(model,proj,viewport,bar.x,bar.y,bar.sx,bar.sy);
+}
+constexpr int kButtonWidth=120, kButtonHeight=36, kToolbarColumns=3;
 int toolbarHit(const Toolbar& b, OfxPointD p) {
     const double x=(p.x-b.x)/b.sx, y=(p.y-b.y)/b.sy;
-    if (!std::isfinite(x) || !std::isfinite(y) || x<0 || x>=11*42 || y<0 || y>=40) return -1;
-    const int button=static_cast<int>(x/42); return x-button*42<40 ? button : -1;
+    if (!std::isfinite(x) || !std::isfinite(y) || x<0 || x>=kToolbarColumns*kButtonWidth || y<0 || y>=2*kButtonHeight) return -1;
+    const int col=int(x/kButtonWidth), row=int(y/kButtonHeight);
+    if (x-col*kButtonWidth>=kButtonWidth-2 || y-row*kButtonHeight>=kButtonHeight-2) return -1;
+    return row==1 ? col : col+3;
 }
-void drawToolbar(const Toolbar& b, int mode, int guided) {
+// Tiny built-in bitmap alphabet avoids relying on a system font or host GL text support.
+const unsigned char* letter(char c) {
+    static const unsigned char blank[7]={0,0,0,0,0,0,0};
+    switch(c) {
+    case 'A': {static const unsigned char p[7]={14,17,17,31,17,17,17};return p;}
+    case 'B': {static const unsigned char p[7]={30,17,17,30,17,17,30};return p;}
+    case 'C': {static const unsigned char p[7]={14,17,16,16,16,17,14};return p;}
+    case 'D': {static const unsigned char p[7]={30,17,17,17,17,17,30};return p;}
+    case 'E': {static const unsigned char p[7]={31,16,16,30,16,16,31};return p;}
+    case 'F': {static const unsigned char p[7]={31,16,16,30,16,16,16};return p;}
+    case 'I': {static const unsigned char p[7]={31,4,4,4,4,4,31};return p;}
+    case 'L': {static const unsigned char p[7]={16,16,16,16,16,16,31};return p;}
+    case 'M': {static const unsigned char p[7]={17,27,21,21,17,17,17};return p;}
+    case 'N': {static const unsigned char p[7]={17,25,21,19,17,17,17};return p;}
+    case 'O': {static const unsigned char p[7]={14,17,17,17,17,17,14};return p;}
+    case 'R': {static const unsigned char p[7]={30,17,17,30,20,18,17};return p;}
+    case 'S': {static const unsigned char p[7]={15,16,16,14,1,1,30};return p;}
+    case 'T': {static const unsigned char p[7]={31,4,4,4,4,4,4};return p;}
+    case 'U': {static const unsigned char p[7]={17,17,17,17,17,17,14};return p;}
+    case 'V': {static const unsigned char p[7]={17,17,17,17,17,10,4};return p;}
+    case 'X': {static const unsigned char p[7]={17,17,10,4,10,17,17};return p;}
+    case '+': {static const unsigned char p[7]={0,4,4,31,4,4,0};return p;}
+    default:return blank;
+    }
+}
+void drawToolbar(const Toolbar& b, int mode, int guided, bool detail) {
     static Gl gl;
     if (!gl.usable()) return;
-    // Simple line glyphs: O L K R G - + U X. Keeps the toolbar independent of fonts.
-    const char* glyphs[]={"024602", "046", "04 15 36", "0402 23 35 56", "0214 46 65 53", "25", "25 13", "04 46 62", "06 24", "416 35", "04 02564"};
-    const double px[]={7,13,19,7,7,19,19};
-    const double py[]={19,19,19,13,7,13,7};
-    // Save/restore all GL state touched. An opaque dark backplate stays legible on pale sky.
+    const char* labels[]={"ADD BOX", "REMOVE BOX", detail ? "DETAIL ON" : "DETAIL OFF", "UNDO", "CLEAR", "OFF"};
     gl.push(0x00000001u | 0x00000004u | 0x00002000u);
-    gl.disable(0x0B71u); // GL_DEPTH_TEST
-    gl.disable(0x0B50u); // GL_LIGHTING
-    gl.disable(0x0B44u); // GL_CULL_FACE
-    gl.disable(0x0BC0u); // GL_ALPHA_TEST
-    gl.disable(0x0DE1u); // GL_TEXTURE_2D
-    gl.disable(0x0BE2u); // GL_BLEND
+    gl.disable(0x0B71u); gl.disable(0x0B50u); gl.disable(0x0B44u);
+    gl.disable(0x0BC0u); gl.disable(0x0DE1u); gl.disable(0x0BE2u);
     gl.width(2.0f);
-    for(int i=0;i<11;++i) {
-        const double x=b.x+i*42*b.sx;
-        gl.colour(0.06f,0.06f,0.06f,1.0f);
-        gl.begin(0x0007u); // GL_QUADS
-        gl.vertex(x,b.y); gl.vertex(x+40*b.sx,b.y); gl.vertex(x+40*b.sx,b.y+40*b.sy); gl.vertex(x,b.y+40*b.sy); gl.end();
-        const bool selected=(i==0&&mode==0)||(i==1&&mode==3)||(i==2&&mode==1)||(i==3&&mode==2)||(i==4&&guided==1)||(i==9&&mode==4)||(i==10&&mode==5);
-        if (selected) gl.colour(1.0f,0.8f,0.1f,1); else gl.colour(0.9f,0.9f,0.9f,1);
-        gl.begin(0x0002u); gl.vertex(x,b.y); gl.vertex(x+40*b.sx,b.y); gl.vertex(x+40*b.sx,b.y+40*b.sy); gl.vertex(x,b.y+40*b.sy); gl.end();
-        if (i==2) gl.colour(0.1f,1,0.2f,1); else if (i==3) gl.colour(1,0.2f,0.2f,1);
-        const char* g=glyphs[i]; bool drawing=false;
-        for(;*g;++g) {
-            if (*g==' ') { if(drawing) gl.end(); drawing=false; continue; }
-            if(!drawing) { gl.begin(0x0003u); drawing=true; }
-            int j=*g-'0'; gl.vertex(x+(px[j]*1.5+0.5)*b.sx,b.y+(py[j]*1.5+0.5)*b.sy);
+    for(int i=0;i<6;++i) {
+        const double x=b.x+(i%3)*kButtonWidth*b.sx, y=b.y+(i<3 ? kButtonHeight : 0)*b.sy;
+        const bool selected=(i==0&&mode==4&&(guided==2||guided==3))||(i==1&&mode==5&&guided==2)||(i==2&&detail)||(i==5&&mode==0);
+        gl.colour(0.045f,0.055f,0.07f,1.0f);
+        gl.begin(0x0007u); gl.vertex(x,y); gl.vertex(x+118*b.sx,y); gl.vertex(x+118*b.sx,y+34*b.sy); gl.vertex(x,y+34*b.sy); gl.end();
+        if(selected) gl.colour(1.0f,0.8f,0.1f,1); else gl.colour(0.65f,0.7f,0.75f,1);
+        gl.begin(0x0002u); gl.vertex(x,y); gl.vertex(x+118*b.sx,y); gl.vertex(x+118*b.sx,y+34*b.sy); gl.vertex(x,y+34*b.sy); gl.end();
+        if(i==0) gl.colour(0.35f,1.0f,0.45f,1); else if(i==1) gl.colour(1.0f,0.4f,0.4f,1); else gl.colour(1,1,1,1);
+        constexpr double scale=1.7; const double textWidth=(std::strlen(labels[i])*6-1)*scale;
+        const double left=(118-textWidth)/2, bottom=(34-7*scale)/2;
+        gl.begin(0x0007u);
+        for(size_t k=0;labels[i][k];++k) {
+            const unsigned char* rows=letter(labels[i][k]);
+            for(int r=0;r<7;++r) for(int c=0;c<5;++c) if(rows[r]&(1u<<(4-c))) {
+                const double x1=x+(left+(k*6+c)*scale)*b.sx, y1=y+(bottom+(6-r)*scale)*b.sy;
+                gl.vertex(x1,y1);gl.vertex(x1+scale*b.sx,y1);gl.vertex(x1+scale*b.sx,y1+scale*b.sy);gl.vertex(x1,y1+scale*b.sy);
+            }
         }
-        if(drawing) gl.end();
+        gl.end();
     }
     gl.pop();
 }
@@ -194,6 +252,7 @@ OfxStatus brushOverlayMain(const char* action, const void* handle, OfxPropertySe
             props.setString(kOfxInteractPropSlaveToParam, 1, pname::kBrushMode);
             props.setString(kOfxInteractPropSlaveToParam, 2, pname::kSelectionMode);
             props.setString(kOfxInteractPropSlaveToParam, 3, pname::kBrushRadius);
+            props.setString(kOfxInteractPropSlaveToParam, 4, pname::kBoxDetailRecovery);
             return kOfxStatOK;
         }
         if (!std::strcmp(action, kOfxActionCreateInstance)) {
@@ -225,9 +284,12 @@ OfxStatus brushOverlayMain(const char* action, const void* handle, OfxPropertySe
             drawStrokes(strokes);
             Toolbar bar{};
             if (toolbarGeometry(effect,time,args,props,bar)) {
-                int mode=0, guided=0; const ParamReader reader(bridge.params(),params);
+                viewportToolbar(bar); // fall back to the source corner if unavailable
+                { std::lock_guard<std::mutex> lock(state->mutex); state->toolbar=bar; state->toolbarValid=true; }
+                int mode=0, guided=0, detail=0; const ParamReader reader(bridge.params(),params);
                 reader.getInt(pname::kBrushMode,time,mode); reader.getInt(pname::kSelectionMode,time,guided);
-                drawToolbar(bar,mode,guided);
+                reader.getInt(pname::kBoxDetailRecovery,time,detail);
+                drawToolbar(bar,mode,guided,detail!=0);
             }
             return kOfxStatOK;
         }
@@ -242,7 +304,9 @@ OfxStatus brushOverlayMain(const char* action, const void* handle, OfxPropertySe
             int mode = 0; double radius = 25;
             const ParamReader reader(bridge.params(), params);
             Toolbar bar{};
-            const int button=toolbarGeometry(effect,time,args,props,bar) ? toolbarHit(bar,pos) : -1;
+            bool valid=toolbarGeometry(effect,time,args,props,bar);
+            { std::lock_guard<std::mutex> lock(state->mutex); if(state->toolbarValid) { bar=state->toolbar; valid=true; } }
+            const int button=valid ? toolbarHit(bar,pos) : -1;
             if (button>=0) {
                 { std::lock_guard<std::mutex> lock(state->mutex); state->buttonDown=true; }
                 const auto* paramSuite=bridge.params();
@@ -251,17 +315,14 @@ OfxStatus brushOverlayMain(const char* action, const void* handle, OfxPropertySe
                     return p && paramSuite && paramSuite->paramSetValue && paramSuite->paramSetValue(p,value)==kOfxStatOK;
                 };
                 bool ok=true;
-                if(button<=3) {
-                    const int modes[]={0,3,1,2}; ok=setChoice(pname::kBrushMode,modes[button]);
-                    if(button==1) ok=setChoice(pname::kSelectionMode,1) && ok;
-                } else if(button==4) {
-                    int guided=0; reader.getInt(pname::kSelectionMode,time,guided);
-                    ok=setChoice(pname::kSelectionMode,guided==1 ? 0 : 1);
-                } else if(button==5 || button==6) {
-                    reader.getDouble(pname::kBrushRadius,time,radius);
-                    ok=std::isfinite(radius) && reader.setDouble(pname::kBrushRadius,time,std::clamp(radius*(button==5 ? 0.8 : 1.25),1.0,200.0));
-                } else if (button==7 || button==8) editSavedBrush(params,time,button==8);
-                else { ok=setChoice(pname::kBrushMode,button==9 ? 4 : 5); ok=setChoice(pname::kSelectionMode,2) && ok; }
+                if(button==0 || button==1) {
+                    ok=setChoice(pname::kBrushMode,button==0 ? 4 : 5);
+                    ok=setChoice(pname::kSelectionMode,2) && ok;
+                } else if(button==2) {
+                    int detail=0; reader.getInt(pname::kBoxDetailRecovery,time,detail);
+                    ok=setChoice(pname::kBoxDetailRecovery,detail ? 0 : 1);
+                } else if(button==3 || button==4) editSavedBrush(params,time,button==4);
+                else ok=setChoice(pname::kBrushMode,0);
                 if(!ok) AIBGR_LOGE("viewer toolbar: host rejected parameter change");
                 if (suite->interactRedraw) suite->interactRedraw(interact);
                 return kOfxStatOK;

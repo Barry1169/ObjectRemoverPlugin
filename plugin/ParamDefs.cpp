@@ -267,7 +267,7 @@ Result defineParameters(OfxParamSetHandle paramSet, const std::vector<ModelChoic
     defineGroup(d, pname::kGroupRemoval, "Background Removal", /*open*/ true);
 
     defineBool(d, pname::kEnable, "Enable",
-               "Auto Remove Background. When off, the node reports itself as an identity and the "
+               "Enable background removal and selection. When off, the node reports itself as an identity and the "
                "host skips it entirely, costing nothing.",
                pname::kGroupRemoval, true);
 
@@ -321,8 +321,8 @@ Result defineParameters(OfxParamSetHandle paramSet, const std::vector<ModelChoic
     if (caps.supportsStrChoice) {
         setModelUsesStrChoice(true);
         const Props h = d.define(kOfxParamTypeStrChoice, pname::kModel);
-        common(h, "Model Selection",
-               "Which segmentation model to run. The list is built from the models actually "
+        common(h, "Automatic Model (legacy)",
+               "Legacy automatic model; not used by AI box selection. The list is built from the models actually "
                "present on disk, so anything missing simply does not appear.",
                pname::kGroupRemoval, /*animates*/ false, /*evaluateOnChange*/ true);
         if (h.valid()) {
@@ -336,8 +336,8 @@ Result defineParameters(OfxParamSetHandle paramSet, const std::vector<ModelChoic
     {
         setModelUsesStrChoice(false);
         AIBGR_LOGI("StrChoice unavailable; Model Selection uses fixed indices (0=key, 1=U2NetP)");
-        defineChoice(d, pname::kModel, "Model Selection",
-                     "Which segmentation model to run. The list is built from the models actually "
+        defineChoice(d, pname::kModel, "Automatic Model (legacy)",
+                     "Legacy automatic model; not used by AI box selection. The list is built from the models actually "
                      "present on disk. Existing colour-key choices remain at index zero.",
                      pname::kGroupRemoval, modelLabels, models.empty() ? 0 : 1);
     }
@@ -381,15 +381,18 @@ Result defineParameters(OfxParamSetHandle paramSet, const std::vector<ModelChoic
                  pname::kGroupRefine, 0.0, -0.5, 0.5, -0.2, 0.2);
 
     defineChoice(d, pname::kSelectionMode, "Viewer Selection Method (experimental)",
-                 "Manual preserves painted corrections. Guided uses keep/remove markings. AI box selection predicts objects from add/remove rectangles; requires the optional EfficientSAM model. All are experimental.",
-                 pname::kGroupRefine, {"Manual corrections", "Guided selection", "AI box selection (experimental)"}, 0);
+                 "Ready leaves the image untouched until you draw an AI add box. The other modes explicitly enable the legacy automatic matte or AI box selection. AI box requires the optional EfficientSAM model.",
+                 pname::kGroupRefine, {"Automatic + manual corrections", "Automatic + guided selection", "AI box selection (experimental)", "Ready (no automatic removal)"}, 3);
+    defineBool(d, pname::kBoxDetailRecovery, "AI Box: Recover More Detail (experimental)",
+               "Tries an additional overlapping AI mask for add boxes to recover missing foliage and branches. It may also retain sky; turn off if the result is worse. Remove boxes are unchanged.",
+               pname::kGroupRefine, false);
     defineChoice(d, pname::kGuidedBrushBehavior, "Guided Brush Behaviour",
                  "Direct corrections preserve the original behaviour. Samples only uses strokes as selection guidance without a full-resolution painted patch. Only affects Guided selection; both foreground and background samples are needed.",
                  pname::kGroupRefine, {"Direct corrections + samples", "Samples only (experimental)"}, 0);
     defineChoice(d, pname::kBrushMode, "Viewer Brush (experimental)",
                  "Enable Open FX Overlay, then draw an outline or paint Keep/Remove markings. "
                  "Keep/Remove paint or guide the matte. AI add/remove box selects predicted objects inside or near rough rectangles; it requires the optional model.",
-                 pname::kGroupRefine, {"Off", "Keep (green)", "Remove (red)", "Outline (guided)", "AI add box", "AI remove box"}, 0);
+                 pname::kGroupRefine, {"Off", "Keep (green)", "Remove (red)", "Outline (guided)", "AI add box", "AI remove box"}, 4);
     defineDouble(d, pname::kBrushRadius, "Viewer Brush Radius",
                  "Brush radius in full-resolution image pixels.", pname::kGroupRefine,
                  25.0, 1.0, 200.0, 1.0, 150.0);

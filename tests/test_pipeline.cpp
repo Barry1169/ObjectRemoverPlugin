@@ -588,3 +588,27 @@ TEST(pipeline, matteSourceIsNonOwningAndNullable) {
     pipeline.setMatteSource(nullptr);
     CHECK(pipeline.matteSource() == nullptr); // and still renders, via the fallback
 }
+
+TEST(pipeline, boxOnlyNeverRunsBaseAndFailurePassesSourceThrough) {
+    class Refiner final : public MatteRefiner {
+    public:
+        bool fail = false;
+        Result refine(const FloatImage&, Matte& matte, bool) override {
+            matte.fill(0.75f);
+            return fail ? Result::fail(Status::BackendError, "simulated selector failure") : Result::success();
+        }
+    } refiner;
+    auto src=makeFrame(48,36); FloatImage dst; Pipeline pipe; PipelineSettings settings;
+    settings.inputColorSpace=ColorSpaceAssumption::DisplayReferred;
+    SpyMatteSource spy; pipe.setMatteSource(&spy); pipe.setSelectionRefiner(&refiner); pipe.setSelectionOnly(true);
+    PipelineStats stats; auto ctx=makeContext(48,36);
+    CHECK(pipe.process(ctx,settings,src,dst,stats).ok());
+    CHECK_EQ(spy.sawWidth,0); CHECK(!stats.matteSourceRan); CHECK_NEAR(dst.pixel(20,20)[3],0.75,1e-6);
+    refiner.fail=true; CHECK(pipe.process(ctx,settings,src,dst,stats).ok());
+    CHECK_EQ(spy.sawWidth,0); CHECK_EQ(stats.message,std::string("selection failed: pass-through"));
+    CHECK_EQ(dst.floatCount(),src.floatCount());
+    for(size_t i=0;i<src.floatCount();++i) CHECK_NEAR(dst.data()[i],src.data()[i],1e-6);
+    pipe.setSelectionRefiner(nullptr);
+    CHECK(pipe.process(ctx,settings,src,dst,stats).ok()); CHECK_EQ(spy.sawWidth,0);
+    for(size_t i=0;i<src.floatCount();++i) CHECK_NEAR(dst.data()[i],src.data()[i],1e-6);
+}

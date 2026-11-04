@@ -9,36 +9,18 @@ It needs testing on the actual image; do not assume it will recover the whole tr
 ## Trying the selection
 
 1. Back up the project and plugin bundle, close Resolve before installing, then test in a disposable
-   project. Choose **U2NetP (AI, CPU)** for the starting matte. The Guidance PNG field may stay empty.
-2. Select the effect and enable **Open FX Overlay** in the viewer. A small toolbar should appear
-   near the lower-left corner of the source image. It has a dark background and larger icons;
-   actual appearance depends on the host's OpenGL context. Its nine buttons are **O L K R G − + U X**:
-   - **O**: stop drawing. **L**: rough outline and turn on guided selection. **K**: green keep
-     brush. **R**: red remove brush. **G**: toggle guided/manual selection.
-   - **− / +**: reduce/increase brush radius. **U**: undo last stroke/outline. **X**: clear all.
-     The Inspector retains the corresponding controls and shows the actual brush radius and
-     selection method. Toolbar controls require the host to provide a source region and viewer
-     pixel scale; use Inspector controls if the toolbar is not shown.
-3. Under **Matte Refinement → Guided Brush Behaviour**, choose **Samples only** to try
-   guiding the selection without the original full-resolution solid paint. It takes effect only
-   in Guided mode. The default **Direct corrections + samples** preserves existing projects.
-   Switching it on reinterprets existing marks as samples, which can change the result. Samples
-   are still areas under the brush, not precise object clicks: keep them inside the object.
-   Choose **L**. Drag one continuous rough loop around the entire tree, branches, buildings and
-   ground, leaving a margin; release to close it automatically. The latest outline is used. Its
-   outside supplies background samples. Then choose **K**, and mark representative foreground
-   colours, including branches, foliage, buildings and ground. If sky remains inside the outline,
-   choose **R** and mark representative sky colours. Start small and add strokes as needed. A
-   selection needs both foreground and background samples; until then the starting matte remains.
-   In the default Direct setting ordinary paint still applies; in Samples only it does not.
-   The outline has no effect in Manual mode.
-4. Strokes/outline appear while dragging, then disappear on release; the saved corrections and
-   selection remain active. Wait for the CPU re-render. Choose **Output → Matte Only** to inspect the
-   result. Use **U** or **X** for mistakes and **O** to stop drawing. Switch Open FX Overlay off to
-   hide the toolbar too; it should not disable the matte.
-5. Verify saving/reopening, proxy/full-resolution alignment and the final export before relying on
-   it. The earlier toolbar and marking input were exercised in Resolve 21, but the newer toolbar,
-   samples-only mode, edge-aware upsampling, persistence and final export require real-host testing.
+   project. To use this *legacy guided* method, choose **Automatic + guided selection** under
+   Viewer Selection Method and select a model under **Automatic Model (legacy)**. The new default
+   Ready mode does not apply an automatic matte.
+2. Select the effect and enable **Open FX Overlay**. The labelled toolbar now focuses on AI boxes;
+   choose **Outline (guided)**, **Keep**, or **Remove** in the Inspector's Viewer Brush menu for
+   the legacy guided tool. The Inspector also has the radius, Undo and Clear controls.
+3. Under **Guided Brush Behaviour**, choose **Samples only** to guide the selection without solid
+   full-resolution paint, or use **Direct corrections + samples** for the original behavior.
+   Draw a loose outline around the subject, then broad Keep/Remove marks for representative colours.
+   This older colour classifier may still miss details and is not GIMP foreground selection.
+4. Strokes appear only while dragging; the saved selection persists. Inspect Output → Matte Only,
+   and verify saving/reopening, proxy/full-resolution alignment and final output.
 
 ## What it does and limitations
 
@@ -60,8 +42,8 @@ It needs testing on the actual image; do not assume it will recover the whole tr
   Undo or Clear if needed. Complex strokes and colour-aware upsampling add CPU render time.
 - Marks are static image coordinates, **not motion tracking** or temporal propagation. The model
   runs on CPU per frame; guided selection adds CPU work. Results may differ on proxies and exports.
-- Existing projects default to **Manual corrections** and retain their old brush behavior. The
-  plugin reads old saved strokes. Outline data, and projects with more than 512 stored points,
+- Existing saved explicit manual/guided indices and strokes are still read, but hosts may use the
+  new Ready default for parameters omitted from old projects. Verify old instances after updating. Outline data, and projects with more than 512 stored points,
   use newer formats which older plugin builds cannot read; save a separate project copy before
   downgrading. Guided results can change because the edge-aware upsampling has been improved.
 - Overlay drawing/interaction depends on Resolve page and viewer. If no controls appear, check the
