@@ -381,15 +381,15 @@ Result defineParameters(OfxParamSetHandle paramSet, const std::vector<ModelChoic
                  pname::kGroupRefine, 0.0, -0.5, 0.5, -0.2, 0.2);
 
     defineChoice(d, pname::kSelectionMode, "Viewer Selection Method (experimental)",
-                 "Manual preserves existing painted corrections. Guided uses keep/remove markings and an optional outline to classify unmarked pixels. Approximate, not GIMP matting.",
-                 pname::kGroupRefine, {"Manual corrections", "Guided selection"}, 0);
+                 "Manual preserves painted corrections. Guided uses keep/remove markings. AI box selection predicts objects from add/remove rectangles; requires the optional EfficientSAM model. All are experimental.",
+                 pname::kGroupRefine, {"Manual corrections", "Guided selection", "AI box selection (experimental)"}, 0);
     defineChoice(d, pname::kGuidedBrushBehavior, "Guided Brush Behaviour",
                  "Direct corrections preserve the original behaviour. Samples only uses strokes as selection guidance without a full-resolution painted patch. Only affects Guided selection; both foreground and background samples are needed.",
                  pname::kGroupRefine, {"Direct corrections + samples", "Samples only (experimental)"}, 0);
     defineChoice(d, pname::kBrushMode, "Viewer Brush (experimental)",
                  "Enable Open FX Overlay, then draw an outline or paint Keep/Remove markings. "
-                 "In Manual mode paint directly changes the matte; Guided mode also estimates unmarked pixels.",
-                 pname::kGroupRefine, {"Off", "Keep (green)", "Remove (red)", "Outline (guided)"}, 0);
+                 "Keep/Remove paint or guide the matte. AI add/remove box selects predicted objects inside or near rough rectangles; it requires the optional model.",
+                 pname::kGroupRefine, {"Off", "Keep (green)", "Remove (red)", "Outline (guided)", "AI add box", "AI remove box"}, 0);
     defineDouble(d, pname::kBrushRadius, "Viewer Brush Radius",
                  "Brush radius in full-resolution image pixels.", pname::kGroupRefine,
                  25.0, 1.0, 200.0, 1.0, 150.0);

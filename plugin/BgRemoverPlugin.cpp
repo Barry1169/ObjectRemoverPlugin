@@ -174,6 +174,7 @@ void PluginInstance::clearCache() {
     std::lock_guard<std::mutex> lock(scratchMutex_);
     pipeline_->releaseBuffers();
     selection_.releaseBuffers();
+    boxSelection_.clearCache();
     guidance_.clear();
     pipeline_->setMatteOverride(nullptr);
     srcFloat_.release();
@@ -194,7 +195,7 @@ void PluginInstance::resetTemporalState() {
 void PluginInstance::preloadModel() {
     // Defer external library initialization until the next render.
     std::lock_guard<std::mutex> lock(scratchMutex_);
-    aiLoadAttempted_ = false;
+    aiLoadAttempted_ = false; boxLoadAttempted_ = false;
     AIBGR_LOGI("AI load retry requested; next render will initialize the model");
 }
 
@@ -458,9 +459,20 @@ Result PluginInstance::render(double time, OfxPropertySetHandle inArgs) {
             if (selectionMode == 1 && !strokes.empty()) {
                 selection_.configure(strokes, ctx);
                 pipeline_->setSelectionRefiner(&selection_);
+            } else if (selectionMode == 2 && std::any_of(strokes.begin(),strokes.end(),[](const BrushStroke& s){return s.box && s.keep;})) {
+                if (!boxLoadAttempted_ && !ctx.thumbnailRender) {
+                    boxLoadAttempted_=true;
+                    const auto models=joinPath(workspaceDir(),"models");
+                    const Result loaded=boxSelection_.open(aiRuntimePath(),joinPath(models,"efficientsam_ti_encoder.onnx"),joinPath(models,"efficientsam_ti_decoder.onnx"));
+                    boxLoaded_=loaded.ok();
+                    if(boxLoaded_) AIBGR_LOGI("AI box selection loaded (EfficientSAM-Ti CPU)");
+                    else AIBGR_LOGE("AI box selection unavailable: %s",loaded.toString().c_str());
+                }
+                if(boxLoaded_) { boxSelection_.configure(strokes,ctx); pipeline_->setSelectionRefiner(&boxSelection_); }
+                else pipeline_->setSelectionRefiner(nullptr);
             } else pipeline_->setSelectionRefiner(nullptr);
             brush_.configure(std::move(strokes), ctx);
-            pipeline_->setBrushOverride(brushData.empty() || (selectionMode == 1 && brushBehavior == 1) ? nullptr : &brush_);
+            pipeline_->setBrushOverride(brushData.empty() || selectionMode == 2 || (selectionMode == 1 && brushBehavior == 1) ? nullptr : &brush_);
             const Result proc = pipeline_->process(ctx, settings, srcFloat_, dstFloat_, lastStats_);
             if (!proc.ok()) {
                 // D9: never fail a render over a content problem. Pass the source through so the

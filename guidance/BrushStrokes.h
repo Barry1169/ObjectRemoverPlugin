@@ -7,7 +7,7 @@
 
 namespace aibgr {
 struct BrushPoint { double x = 0, y = 0; };
-struct BrushStroke { bool keep = true; double radius = 20; std::vector<BrushPoint> points; bool outline = false; };
+struct BrushStroke { bool keep = true; double radius = 20; std::vector<BrushPoint> points; bool outline = false; bool box = false; };
 // Hard limits keep host-supplied project data and render work bounded.
 constexpr size_t kMaxBrushPoints = 8192;
 constexpr size_t kMaxPointsPerStroke = 4096;

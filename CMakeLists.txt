@@ -168,6 +168,7 @@ add_library(aibgr_core STATIC
   matte/Resize.cpp
   matte/PlaceholderMatte.cpp
   inference/U2NetSegmenter.cpp
+  inference/BoxSelector.cpp
   guidance/CorrectionMask.cpp
   guidance/BrushStrokes.cpp
   guidance/GuidedSelection.cpp
@@ -274,6 +275,7 @@ if(BUILD_TESTS)
     tests/test_pipeline.cpp
     tests/test_pipeline_settings.cpp
     tests/test_u2net.cpp
+    tests/test_box_selector.cpp
     tests/test_guidance.cpp
     tests/test_brush.cpp
   )

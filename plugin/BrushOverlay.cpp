@@ -102,14 +102,14 @@ bool toolbarGeometry(OfxImageEffectHandle effect, double time, const Props& args
 }
 int toolbarHit(const Toolbar& b, OfxPointD p) {
     const double x=(p.x-b.x)/b.sx, y=(p.y-b.y)/b.sy;
-    if (!std::isfinite(x) || !std::isfinite(y) || x<0 || x>=9*42 || y<0 || y>=40) return -1;
+    if (!std::isfinite(x) || !std::isfinite(y) || x<0 || x>=11*42 || y<0 || y>=40) return -1;
     const int button=static_cast<int>(x/42); return x-button*42<40 ? button : -1;
 }
 void drawToolbar(const Toolbar& b, int mode, int guided) {
     static Gl gl;
     if (!gl.usable()) return;
     // Simple line glyphs: O L K R G - + U X. Keeps the toolbar independent of fonts.
-    const char* glyphs[]={"024602", "046", "04 15 36", "0402 23 35 56", "0214 46 65 53", "25", "25 13", "04 46 62", "06 24"};
+    const char* glyphs[]={"024602", "046", "04 15 36", "0402 23 35 56", "0214 46 65 53", "25", "25 13", "04 46 62", "06 24", "416 35", "04 02564"};
     const double px[]={7,13,19,7,7,19,19};
     const double py[]={19,19,19,13,7,13,7};
     // Save/restore all GL state touched. An opaque dark backplate stays legible on pale sky.
@@ -121,12 +121,12 @@ void drawToolbar(const Toolbar& b, int mode, int guided) {
     gl.disable(0x0DE1u); // GL_TEXTURE_2D
     gl.disable(0x0BE2u); // GL_BLEND
     gl.width(2.0f);
-    for(int i=0;i<9;++i) {
+    for(int i=0;i<11;++i) {
         const double x=b.x+i*42*b.sx;
         gl.colour(0.06f,0.06f,0.06f,1.0f);
         gl.begin(0x0007u); // GL_QUADS
         gl.vertex(x,b.y); gl.vertex(x+40*b.sx,b.y); gl.vertex(x+40*b.sx,b.y+40*b.sy); gl.vertex(x,b.y+40*b.sy); gl.end();
-        const bool selected=(i==0&&mode==0)||(i==1&&mode==3)||(i==2&&mode==1)||(i==3&&mode==2)||(i==4&&guided==1);
+        const bool selected=(i==0&&mode==0)||(i==1&&mode==3)||(i==2&&mode==1)||(i==3&&mode==2)||(i==4&&guided==1)||(i==9&&mode==4)||(i==10&&mode==5);
         if (selected) gl.colour(1.0f,0.8f,0.1f,1); else gl.colour(0.9f,0.9f,0.9f,1);
         gl.begin(0x0002u); gl.vertex(x,b.y); gl.vertex(x+40*b.sx,b.y); gl.vertex(x+40*b.sx,b.y+40*b.sy); gl.vertex(x,b.y+40*b.sy); gl.end();
         if (i==2) gl.colour(0.1f,1,0.2f,1); else if (i==3) gl.colour(1,0.2f,0.2f,1);
@@ -147,10 +147,15 @@ void drawStrokes(const std::vector<BrushStroke>& strokes) {
     gl.width(2.0f);
     for (const auto& s : strokes) {
         gl.colour(s.outline ? 1.0f : s.keep ? 0.0f : 1.0f, s.outline || s.keep ? 1.0f : 0.0f, 0.0f, 1.0f);
-        gl.begin(0x0003u); // GL_LINE_STRIP
-        for (const auto& p : s.points) gl.vertex(p.x,p.y);
-        gl.end();
-        if (s.outline) continue;
+        if (s.box && s.points.size()==2) {
+            const auto a=s.points[0],b=s.points[1]; gl.begin(0x0002u);
+            gl.vertex(a.x,a.y); gl.vertex(b.x,a.y); gl.vertex(b.x,b.y); gl.vertex(a.x,b.y); gl.end();
+        } else {
+            gl.begin(0x0003u); // GL_LINE_STRIP
+            for (const auto& p : s.points) gl.vertex(p.x,p.y);
+            gl.end();
+        }
+        if (s.outline || s.box) continue;
         for (const auto& p : s.points) {
             gl.begin(0x0002u); // GL_LINE_LOOP
             for (int j=0; j<20; ++j) {
@@ -255,20 +260,30 @@ OfxStatus brushOverlayMain(const char* action, const void* handle, OfxPropertySe
                 } else if(button==5 || button==6) {
                     reader.getDouble(pname::kBrushRadius,time,radius);
                     ok=std::isfinite(radius) && reader.setDouble(pname::kBrushRadius,time,std::clamp(radius*(button==5 ? 0.8 : 1.25),1.0,200.0));
-                } else editSavedBrush(params,time,button==8);
+                } else if (button==7 || button==8) editSavedBrush(params,time,button==8);
+                else { ok=setChoice(pname::kBrushMode,button==9 ? 4 : 5); ok=setChoice(pname::kSelectionMode,2) && ok; }
                 if(!ok) AIBGR_LOGE("viewer toolbar: host rejected parameter change");
                 if (suite->interactRedraw) suite->interactRedraw(interact);
                 return kOfxStatOK;
             }
             reader.getInt(pname::kBrushMode, time, mode);
             reader.getDouble(pname::kBrushRadius, time, radius);
-            if ((mode != 1 && mode != 2 && mode != 3) || !std::isfinite(radius)) return kOfxStatReplyDefault;
+            if ((mode != 1 && mode != 2 && mode != 3 && mode != 4 && mode != 5) || !std::isfinite(radius)) return kOfxStatReplyDefault;
+            if (mode==4 || mode==5) {
+                int selected=0; reader.getInt(pname::kSelectionMode,time,selected);
+                if(selected!=2) {
+                    auto param=reader.handle(pname::kSelectionMode);
+                    if(!param || !bridge.params()->paramSetValue || bridge.params()->paramSetValue(param,2)!=kOfxStatOK) {
+                        AIBGR_LOGE("viewer box: could not enable AI selection mode"); return kOfxStatReplyDefault;
+                    }
+                }
+            }
             {
                 std::lock_guard<std::mutex> lock(state->mutex);
-                state->current = BrushStroke{}; state->overflow = false; state->current.keep = (mode == 1); state->current.outline = (mode == 3); state->current.radius = std::clamp(radius,1.0,200.0);
-                state->current.points.push_back({pos.x,pos.y}); state->dragging = true;
+                state->current = BrushStroke{}; state->overflow = false; state->current.keep = (mode == 1 || mode == 4); state->current.outline = (mode == 3); state->current.box = (mode == 4 || mode == 5); state->current.radius = std::clamp(radius,1.0,200.0);
+                state->current.points.push_back({pos.x,pos.y}); if (state->current.box) state->current.points.push_back({pos.x,pos.y}); state->dragging = true;
             }
-            AIBGR_LOGI("viewer brush: started %s stroke", mode == 1 ? "keep" : mode == 2 ? "remove" : "outline");
+            AIBGR_LOGI("viewer brush: started %s stroke", mode == 1 ? "keep" : mode == 2 ? "remove" : mode == 3 ? "outline" : mode == 4 ? "add box" : "remove box");
             if (suite->interactRedraw) suite->interactRedraw(interact);
             return kOfxStatOK;
         }
@@ -282,7 +297,9 @@ OfxStatus brushOverlayMain(const char* action, const void* handle, OfxPropertySe
                 if (state->buttonDown) { if (isUp) state->buttonDown=false; return kOfxStatOK; }
                 if (!state->dragging) return kOfxStatReplyDefault;
                 const auto& last = state->current.points.back();
-                if (havePosition && std::isfinite(pos.x) && std::isfinite(pos.y) && std::abs(pos.x)<=1000000 && std::abs(pos.y)<=1000000 &&
+                if (state->current.box && havePosition && std::isfinite(pos.x) && std::isfinite(pos.y) && std::abs(pos.x)<=1000000 && std::abs(pos.y)<=1000000) {
+                    state->current.points[1]={pos.x,pos.y};
+                } else if (!state->current.box && havePosition && std::isfinite(pos.x) && std::isfinite(pos.y) && std::abs(pos.x)<=1000000 && std::abs(pos.y)<=1000000 &&
                     std::hypot(pos.x-last.x,pos.y-last.y) > (state->current.outline ? 10.0 : state->current.radius*0.2)) {
                     if (state->current.points.size() < kMaxPointsPerStroke) state->current.points.push_back({pos.x,pos.y});
                     else state->overflow=true;
@@ -303,8 +320,12 @@ OfxStatus brushOverlayMain(const char* action, const void* handle, OfxPropertySe
                     for (const auto& s : strokes) count += s.points.size();
                     if (overflow) {
                         warn("Stroke discarded: too many sampled points. Draw a shorter stroke, or use Undo/Clear.");
+                    } else if (finished.box && (std::abs(finished.points[0].x-finished.points[1].x)<1 || std::abs(finished.points[0].y-finished.points[1].y)<1)) {
+                        warn("Draw a box around the object rather than clicking a single point.");
                     } else if (finished.outline && finished.points.size() < 3) {
                         warn("Outline needs at least three points; draw a longer outline.");
+                    } else if (finished.box && std::count_if(strokes.begin(),strokes.end(),[](const BrushStroke& s){return s.box;}) >= 32) {
+                        warn("AI box limit reached (32). Use Undo or Clear to remove boxes.");
                     } else if (count <= kMaxBrushPoints) {
                         strokes.push_back(std::move(finished));
                         if (!writeStrokes(params, strokes)) warn("Resolve could not save this stroke. The stroke was not applied.");

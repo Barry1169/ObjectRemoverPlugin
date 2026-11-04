@@ -38,7 +38,7 @@ Result GuidedSelection::refine(const FloatImage& image, Matte& matte, bool inver
         priorSmall_.resize(w,h); resizeArea(matte,priorSmall_);
         // Latest closed outline marks everything outside as background. Painted strokes override it.
         const BrushStroke* outline=nullptr;
-        for (const auto& s: strokes_) if (s.outline && s.points.size()>=3) outline=&s;
+        for (const auto& s: strokes_) if (!s.box && s.outline && s.points.size()>=3) outline=&s;
         const double sx=ctx_.renderScaleX/std::max(ctx_.pixelAspectX,1e-8), sy=ctx_.renderScaleY;
         if (!(sx>0 && sy>0 && std::isfinite(sx) && std::isfinite(sy))) return Result::fail(Status::InvalidArgument,"invalid coordinates");
         const size_t n=static_cast<size_t>(w)*h;

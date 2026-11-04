@@ -100,6 +100,7 @@ public:
     void setMatteOverride(const MatteOverride* value) noexcept { matteOverride_ = value; }
     void setBrushOverride(const MatteOverride* value) noexcept { brushOverride_ = value; }
     void setSelectionRefiner(MatteRefiner* value) noexcept { selectionRefiner_ = value; }
+    MatteRefiner* selectionRefiner() const noexcept { return selectionRefiner_; }
 
     void setAbortChecker(const AbortChecker* checker) noexcept { abortChecker_ = checker; }
 

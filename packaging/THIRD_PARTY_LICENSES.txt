@@ -257,3 +257,13 @@ SOFTWARE.
 ================================================================================
 END OF FILE
 ================================================================================
+
+================================================================================
+6. EfficientSAM-Ti — OPTIONAL WEIGHTS, DOWNLOADED SEPARATELY
+================================================================================
+The optional box-selection feature loads the original EfficientSAM-Ti ONNX encoder
+and decoder from the user's workspace, not from this bundle. The setup script
+fetches fixed Git blobs published by https://github.com/yformer/EfficientSAM and
+verifies SHA-256 hashes. The upstream repository is licensed Apache-2.0; review
+its LICENSE and the provenance and terms of the model weights and training data
+before redistribution. No model weights are redistributed in this bundle.

@@ -15,6 +15,7 @@
 #include <cstdarg>
 #include <chrono>
 #include <filesystem>
+#include <fstream>
 #include <thread>
 #include <map>
 #include <string>
@@ -543,5 +544,66 @@ TEST(ofxStability, guidedSamplesOnlyDoesNotApplyDirectPaintWithoutBothClasses) {
     host.selectionMode=0; // manual mode always uses paint
     CHECK_EQ(pluginMain(kOfxImageEffectActionRender,host.effect(),handle(host.args),nullptr),kOfxStatOK);
     CHECK_NEAR(host.output[(20*64+20)*4+3],1.0,1e-6);
+    CHECK_EQ(pluginMain(kOfxActionDestroyInstance,host.effect(),nullptr,nullptr),kOfxStatOK);
+}
+
+TEST(ofxStability, aiBoxInteractionStoresRectAndKeepsLegacyStrokes) {
+    FakeHost host; setModelUsesStrChoice(false); host.brushMode=4;
+    host.brushData=aibgr::serialiseBrushStrokes({{true,5,{{10,10}}}});
+    CHECK_EQ(pluginMain(kOfxActionCreateInstance,host.effect(),nullptr,nullptr),kOfxStatOK);
+    Properties overlay, pen; overlay.pointers[kOfxPropEffectInstance]=host.effect();
+    pen.doubles[kOfxInteractPropPenPosition]={300,100};
+    const void* h=reinterpret_cast<const void*>(handle(overlay));
+    CHECK_EQ(brushOverlayMain(kOfxActionCreateInstance,h,nullptr,nullptr),kOfxStatOK);
+    CHECK_EQ(brushOverlayMain(kOfxInteractActionPenDown,h,handle(pen),nullptr),kOfxStatOK);
+    pen.doubles[kOfxInteractPropPenPosition]={500,300};
+    CHECK_EQ(brushOverlayMain(kOfxInteractActionPenMotion,h,handle(pen),nullptr),kOfxStatOK);
+    CHECK_EQ(brushOverlayMain(kOfxInteractActionPenUp,h,handle(pen),nullptr),kOfxStatOK);
+    CHECK_EQ(host.selectionMode,2);
+    std::vector<aibgr::BrushStroke> strokes; CHECK(aibgr::parseBrushStrokes(host.brushData,strokes));
+    CHECK_EQ(strokes.size(),size_t(2)); CHECK(strokes[1].box); CHECK(strokes[1].keep); CHECK_EQ(strokes[1].points.size(),size_t(2));
+    CHECK(host.brushData.find("AIBGR4 ")==0);
+    CHECK_EQ(brushOverlayMain(kOfxActionDestroyInstance,h,nullptr,nullptr),kOfxStatOK);
+    CHECK_EQ(pluginMain(kOfxActionDestroyInstance,host.effect(),nullptr,nullptr),kOfxStatOK);
+}
+
+TEST(ofxStability, realAiBoxModeRendersWhenModelsProvided) {
+    const char* raw=std::getenv("AIBGR_TEST_BOX_TREE_RAW");
+    if(!raw || !std::getenv("AIBGR_TEST_BOX_ENCODER")) return;
+    const auto dir=aibgr::joinPath(workspaceDir(),"models");
+    if(!aibgr::fileExists(aiRuntimePath()) || !aibgr::fileExists(aibgr::joinPath(dir,"efficientsam_ti_encoder.onnx"))) return;
+    std::vector<float> pixels(size_t(1024)*574*4); std::ifstream file(raw,std::ios::binary);
+    file.read(reinterpret_cast<char*>(pixels.data()),static_cast<std::streamsize>(pixels.size()*sizeof(float)));
+    CHECK(file.good()); if(!file.good()) return;
+    FakeHost host; setModelUsesStrChoice(false); host.selectionMode=2;
+    for(int y=0;y<64;++y) for(int x=0;x<64;++x) for(int c=0;c<4;++c)
+        host.source[(y*64+x)*4+c]=pixels[(size_t(y)*574/64*1024+size_t(x)*1024/64)*4+c];
+    host.brushData=aibgr::serialiseBrushStrokes({{true,1,{{6.25,0.5},{51.5,63.5}},false,true}});
+    CHECK_EQ(pluginMain(kOfxActionCreateInstance,host.effect(),nullptr,nullptr),kOfxStatOK);
+    CHECK_EQ(pluginMain(kOfxImageEffectActionRender,host.effect(),handle(host.args),nullptr),kOfxStatOK);
+    PluginInstance* instance=findInstance(host.effect()); CHECK(instance!=nullptr);
+    if(instance) CHECK(instance->pipeline().selectionRefiner()!=nullptr);
+    CHECK(host.output[(28*64+30)*4+3]>0.5f);
+    CHECK(host.output[(50*64+2)*4+3]<0.5f);
+    CHECK_EQ(host.paramWrites,0);
+    CHECK_EQ(pluginMain(kOfxActionDestroyInstance,host.effect(),nullptr,nullptr),kOfxStatOK);
+}
+
+TEST(ofxStability, aiToolbarButtonsChooseAddAndSubtract) {
+    FakeHost host; setModelUsesStrChoice(false);
+    CHECK_EQ(pluginMain(kOfxActionCreateInstance,host.effect(),nullptr,nullptr),kOfxStatOK);
+    Properties overlay, pen; overlay.pointers[kOfxPropEffectInstance]=host.effect();
+    pen.doubles[kOfxInteractPropPixelScale]={1,1};
+    const void* h=reinterpret_cast<const void*>(handle(overlay));
+    CHECK_EQ(brushOverlayMain(kOfxActionCreateInstance,h,nullptr,nullptr),kOfxStatOK);
+    pen.doubles[kOfxInteractPropPenPosition]={396,20}; // A
+    CHECK_EQ(brushOverlayMain(kOfxInteractActionPenDown,h,handle(pen),nullptr),kOfxStatOK);
+    CHECK_EQ(brushOverlayMain(kOfxInteractActionPenUp,h,handle(pen),nullptr),kOfxStatOK);
+    CHECK_EQ(host.brushMode,4); CHECK_EQ(host.selectionMode,2); CHECK(host.brushData.empty());
+    pen.doubles[kOfxInteractPropPenPosition]={438,20}; // D
+    CHECK_EQ(brushOverlayMain(kOfxInteractActionPenDown,h,handle(pen),nullptr),kOfxStatOK);
+    CHECK_EQ(brushOverlayMain(kOfxInteractActionPenUp,h,handle(pen),nullptr),kOfxStatOK);
+    CHECK_EQ(host.brushMode,5); CHECK_EQ(host.selectionMode,2); CHECK(host.brushData.empty());
+    CHECK_EQ(brushOverlayMain(kOfxActionDestroyInstance,h,nullptr,nullptr),kOfxStatOK);
     CHECK_EQ(pluginMain(kOfxActionDestroyInstance,host.effect(),nullptr,nullptr),kOfxStatOK);
 }

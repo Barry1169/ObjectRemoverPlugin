@@ -12,6 +12,7 @@
 #include "core/Pipeline.h"
 #include "core/PipelineSettings.h"
 #include "inference/U2NetSegmenter.h"
+#include "inference/BoxSelector.h"
 #include "guidance/CorrectionMask.h"
 #include "guidance/BrushStrokes.h"
 #include "guidance/GuidedSelection.h"
@@ -112,6 +113,8 @@ private:
     CorrectionMask guidance_;
     BrushCorrections brush_;
     GuidedSelection selection_;
+    BoxSelector boxSelection_;
+    bool boxLoadAttempted_ = false, boxLoaded_ = false;
     bool aiLoadAttempted_ = false;
     OfxAbortChecker abortChecker_;
 
