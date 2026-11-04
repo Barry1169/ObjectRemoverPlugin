@@ -252,3 +252,30 @@ void fitAndAlign(int width, int height, int maxEdge, int alignment, int& outW,
 }
 
 } // namespace aibgr
+
+namespace aibgr {
+void resizeEdgeAware(const Matte& src, const FloatImage& lowGuide, const FloatImage& highGuide, Matte& dst) {
+    if (src.empty() || dst.empty() || src.width()!=lowGuide.width() || src.height()!=lowGuide.height() ||
+        dst.width()!=highGuide.width() || dst.height()!=highGuide.height()) return;
+    auto channel=[](float v) { return std::isfinite(v) ? std::clamp(v,0.0f,1.0f) : 0.0f; };
+    for(int y=0;y<dst.height();++y) {
+        const float sy=(y+0.5f)*src.height()/dst.height()-0.5f;
+        const int ybase=static_cast<int>(std::floor(sy)); const float fy=sy-ybase;
+        for(int x=0;x<dst.width();++x) {
+            const float sx=(x+0.5f)*src.width()/dst.width()-0.5f;
+            const int xbase=static_cast<int>(std::floor(sx)); const float fx=sx-xbase;
+            const float* hp=highGuide.pixel(x,y); float sum=0, weights=0;
+            for(int j=0;j<2;++j) for(int i=0;i<2;++i) {
+                const int xx=std::clamp(xbase+i,0,src.width()-1), yy=std::clamp(ybase+j,0,src.height()-1);
+                const float* lp=lowGuide.pixel(xx,yy); float difference=0;
+                for(int c=0;c<3;++c) { const float d=channel(hp[c])-channel(lp[c]); difference+=d*d; }
+                const float spatial=(i ? fx : 1-fx)*(j ? fy : 1-fy);
+                // Bounded bilateral weighting preserves high-contrast edges without a per-pixel exp.
+                const float weight=spatial/(1.0f+40.0f*difference+400.0f*difference*difference);
+                weights+=weight; sum+=weight*src.at(xx,yy);
+            }
+            dst.at(x,y)=weights>0 ? std::clamp(sum/weights,0.0f,1.0f) : 0.0f;
+        }
+    }
+}
+} // namespace aibgr

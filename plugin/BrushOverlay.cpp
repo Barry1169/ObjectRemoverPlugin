@@ -284,12 +284,14 @@ OfxStatus brushOverlayMain(const char* action, const void* handle, OfxPropertySe
                 const auto& last = state->current.points.back();
                 if (havePosition && std::isfinite(pos.x) && std::isfinite(pos.y) && std::abs(pos.x)<=1000000 && std::abs(pos.y)<=1000000 &&
                     std::hypot(pos.x-last.x,pos.y-last.y) > (state->current.outline ? 10.0 : state->current.radius*0.2)) {
-                    if (state->current.points.size() < kMaxBrushPoints) state->current.points.push_back({pos.x,pos.y});
+                    if (state->current.points.size() < kMaxPointsPerStroke) state->current.points.push_back({pos.x,pos.y});
                     else state->overflow=true;
                 }
                 if (isUp) { state->dragging = false; finished = state->current; overflow=state->overflow; }
             }
             if (isUp) {
+                // Preserve geometry while eliminating redundant points from long, smooth drags.
+                simplifyBrushStroke(finished, finished.outline ? 1.0 : std::min(1.0,finished.radius*0.08));
                 auto warn = [&](const char* text) {
                     AIBGR_LOGE("viewer brush: %s", text);
                     const auto* messages=bridge.message();

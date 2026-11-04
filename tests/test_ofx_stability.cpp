@@ -61,7 +61,7 @@ struct FakeHost {
     int modelIndex = 0;
     std::string modelValue = "__fallback__";
     std::string guidancePath, brushData, warning;
-    int brushMode = 0, selectionMode = 0, redraws = 0;
+    int brushMode = 0, selectionMode = 0, brushBehavior = 0, redraws = 0;
     double brushRadius = 6;
     OfxImageEffectHandle effect() { return reinterpret_cast<OfxImageEffectHandle>(&effectToken); }
     OfxParamSetHandle paramSet() { return reinterpret_cast<OfxParamSetHandle>(&paramToken); }
@@ -90,6 +90,7 @@ OfxStatus getParameterAtTime(OfxParamHandle p, OfxTime time, ...) {
         std::strcmp(name, pname::kFallbackKeySoftness) != 0 &&
         std::strcmp(name, pname::kModel) != 0 &&
         std::strcmp(name, pname::kGuidancePath) != 0 &&
+        std::strcmp(name, pname::kGuidedBrushBehavior) != 0 &&
         std::strcmp(name, pname::kSelectionMode) != 0 &&
         std::strcmp(name, pname::kBrushMode) != 0 &&
         std::strcmp(name, pname::kBrushRadius) != 0 &&
@@ -98,6 +99,8 @@ OfxStatus getParameterAtTime(OfxParamHandle p, OfxTime time, ...) {
     va_start(args, time);
     if (std::strcmp(name, pname::kBrushData) == 0) {
         char** result = va_arg(args, char**); *result = const_cast<char*>(current->brushData.c_str());
+    } else if (std::strcmp(name, pname::kGuidedBrushBehavior) == 0) {
+        int* result = va_arg(args, int*); *result = current->brushBehavior;
     } else if (std::strcmp(name, pname::kSelectionMode) == 0) {
         int* result = va_arg(args, int*); *result = current->selectionMode;
     } else if (std::strcmp(name, pname::kBrushMode) == 0) {
@@ -134,7 +137,7 @@ OfxStatus setParameterAtTime(OfxParamHandle p, OfxTime, ...) {
 }
 OfxStatus setParameter(OfxParamHandle p, ...) {
     const char* name = reinterpret_cast<const char*>(p);
-    if (std::strcmp(name, pname::kBrushData) && std::strcmp(name, pname::kBrushMode) && std::strcmp(name, pname::kSelectionMode)) return kOfxStatErrUnknown;
+    if (std::strcmp(name, pname::kBrushData) && std::strcmp(name, pname::kBrushMode) && std::strcmp(name, pname::kSelectionMode) && std::strcmp(name, pname::kGuidedBrushBehavior)) return kOfxStatErrUnknown;
     va_list args; va_start(args, p);
     if (!std::strcmp(name, pname::kBrushData)) {
         const char* value = va_arg(args, const char*); current->brushData = value ? value : "";
@@ -203,7 +206,7 @@ FakeHost::FakeHost() {
             std::strcmp(name, pname::kShiftMatte) && std::strcmp(name, pname::kFallbackKeyTolerance) &&
             std::strcmp(name, pname::kFallbackKeySoftness) && std::strcmp(name, pname::kModel) &&
             std::strcmp(name, pname::kGuidancePath) && std::strcmp(name, pname::kBrushData) &&
-            std::strcmp(name, pname::kBrushMode) && std::strcmp(name, pname::kBrushRadius) && std::strcmp(name, pname::kSelectionMode)) return kOfxStatErrUnknown;
+            std::strcmp(name, pname::kBrushMode) && std::strcmp(name, pname::kBrushRadius) && std::strcmp(name, pname::kSelectionMode) && std::strcmp(name, pname::kGuidedBrushBehavior)) return kOfxStatErrUnknown;
         *out = reinterpret_cast<OfxParamHandle>(const_cast<char*>(name)); return kOfxStatOK;
     };
     params.paramGetValueAtTime = getParameterAtTime;
@@ -488,8 +491,8 @@ TEST(ofxStability, guidedModeRendersUnmarkedRegionsAndPersists) {
 TEST(ofxStability, pointLimitWarnsWithoutDiscardingSavedData) {
     FakeHost host; setModelUsesStrChoice(false);
     aibgr::BrushStroke full; full.keep=true; full.radius=3;
-    for(size_t i=0;i<aibgr::kMaxBrushPoints;++i) full.points.push_back({double(i),50.0});
-    host.brushData=aibgr::serialiseBrushStrokes({full}); const std::string original=host.brushData;
+    for(size_t i=0;i<aibgr::kMaxPointsPerStroke;++i) full.points.push_back({double(i),50.0});
+    host.brushData=aibgr::serialiseBrushStrokes({full,full}); const std::string original=host.brushData;
     host.brushMode=1;
     CHECK_EQ(pluginMain(kOfxActionCreateInstance,host.effect(),nullptr,nullptr),kOfxStatOK);
     Properties overlay, pen; overlay.pointers[kOfxPropEffectInstance]=host.effect();
@@ -501,5 +504,44 @@ TEST(ofxStability, pointLimitWarnsWithoutDiscardingSavedData) {
     CHECK(host.warning.find("limit reached")!=std::string::npos);
     CHECK_EQ(host.brushData,original); CHECK_EQ(host.paramWrites,0);
     CHECK_EQ(brushOverlayMain(kOfxActionDestroyInstance,h,nullptr,nullptr),kOfxStatOK);
+    CHECK_EQ(pluginMain(kOfxActionDestroyInstance,host.effect(),nullptr,nullptr),kOfxStatOK);
+}
+
+TEST(ofxStability, longKeepAndRemoveStrokesContinuePastOldLimit) {
+    FakeHost host; setModelUsesStrChoice(false); host.brushRadius=3;
+    CHECK_EQ(pluginMain(kOfxActionCreateInstance,host.effect(),nullptr,nullptr),kOfxStatOK);
+    Properties overlay, pen; overlay.pointers[kOfxPropEffectInstance]=host.effect();
+    const void* h=reinterpret_cast<const void*>(handle(overlay));
+    CHECK_EQ(brushOverlayMain(kOfxActionCreateInstance,h,nullptr,nullptr),kOfxStatOK);
+    for(int stroke=0;stroke<3;++stroke) {
+        host.brushMode=stroke==2 ? 2 : 1;
+        pen.doubles[kOfxInteractPropPenPosition]={400.0,100.0+stroke*20};
+        CHECK_EQ(brushOverlayMain(kOfxInteractActionPenDown,h,handle(pen),nullptr),kOfxStatOK);
+        for(int i=1;i<=300;++i) {
+            pen.doubles[kOfxInteractPropPenPosition]={400.0+i*2,100.0+stroke*20+(i%2)*4};
+            CHECK_EQ(brushOverlayMain(kOfxInteractActionPenMotion,h,handle(pen),nullptr),kOfxStatOK);
+        }
+        CHECK_EQ(brushOverlayMain(kOfxInteractActionPenUp,h,handle(pen),nullptr),kOfxStatOK);
+    }
+    std::vector<aibgr::BrushStroke> strokes;
+    CHECK(aibgr::parseBrushStrokes(host.brushData,strokes)); CHECK_EQ(strokes.size(),size_t(3));
+    CHECK(host.brushData.find("AIBGR3 ")==0); CHECK(host.warning.empty());
+    CHECK(strokes[0].points.size()+strokes[1].points.size()>512); CHECK(!strokes[2].keep);
+    CHECK_EQ(brushOverlayMain(kOfxActionDestroyInstance,h,nullptr,nullptr),kOfxStatOK);
+    CHECK_EQ(pluginMain(kOfxActionDestroyInstance,host.effect(),nullptr,nullptr),kOfxStatOK);
+}
+
+TEST(ofxStability, guidedSamplesOnlyDoesNotApplyDirectPaintWithoutBothClasses) {
+    FakeHost host; setModelUsesStrChoice(false); host.selectionMode=1;
+    host.brushData=aibgr::serialiseBrushStrokes({{true,6,{{20,20}}}});
+    CHECK_EQ(pluginMain(kOfxActionCreateInstance,host.effect(),nullptr,nullptr),kOfxStatOK);
+    CHECK_EQ(pluginMain(kOfxImageEffectActionRender,host.effect(),handle(host.args),nullptr),kOfxStatOK);
+    CHECK_NEAR(host.output[(20*64+20)*4+3],1.0,1e-6); // legacy/default direct paint
+    host.brushBehavior=1;
+    CHECK_EQ(pluginMain(kOfxImageEffectActionRender,host.effect(),handle(host.args),nullptr),kOfxStatOK);
+    CHECK_NEAR(host.output[(20*64+20)*4+3],0.0,1e-6); // one seed class: prior only
+    host.selectionMode=0; // manual mode always uses paint
+    CHECK_EQ(pluginMain(kOfxImageEffectActionRender,host.effect(),handle(host.args),nullptr),kOfxStatOK);
+    CHECK_NEAR(host.output[(20*64+20)*4+3],1.0,1e-6);
     CHECK_EQ(pluginMain(kOfxActionDestroyInstance,host.effect(),nullptr,nullptr),kOfxStatOK);
 }

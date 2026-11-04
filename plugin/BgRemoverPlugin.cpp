@@ -408,12 +408,13 @@ Result PluginInstance::render(double time, OfxPropertySetHandle inArgs) {
     }
 
     std::string guidancePath, brushData;
-    int selectionMode = 0;
+    int selectionMode = 0, brushBehavior = 0;
     if (paramSet_) {
         const ParamReader p(bridge.params(), paramSet_);
         p.getString(pname::kGuidancePath, time, guidancePath);
         p.getString(pname::kBrushData, time, brushData);
         p.getInt(pname::kSelectionMode, time, selectionMode);
+        p.getInt(pname::kGuidedBrushBehavior, time, brushBehavior);
     }
 
     Result outcome = Result::success();
@@ -459,7 +460,7 @@ Result PluginInstance::render(double time, OfxPropertySetHandle inArgs) {
                 pipeline_->setSelectionRefiner(&selection_);
             } else pipeline_->setSelectionRefiner(nullptr);
             brush_.configure(std::move(strokes), ctx);
-            pipeline_->setBrushOverride(brushData.empty() ? nullptr : &brush_);
+            pipeline_->setBrushOverride(brushData.empty() || (selectionMode == 1 && brushBehavior == 1) ? nullptr : &brush_);
             const Result proc = pipeline_->process(ctx, settings, srcFloat_, dstFloat_, lastStats_);
             if (!proc.ok()) {
                 // D9: never fail a render over a content problem. Pass the source through so the

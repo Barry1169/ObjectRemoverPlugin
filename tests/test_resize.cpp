@@ -250,3 +250,16 @@ TEST(resize, sameSizeCopyIsLossless) {
         }
     }
 }
+
+TEST(resize, edgeAwareKeepsSharpColourBoundary) {
+    aibgr::FloatImage high(16,4), low(4,1);
+    for(int y=0;y<4;++y) for(int x=0;x<16;++x) {
+        float* p=high.pixel(x,y); p[0]=x<8 ? 1.0f : 0.0f; p[1]=0; p[2]=x<8 ? 0.0f : 1.0f; p[3]=1;
+    }
+    aibgr::resizeArea(high,low);
+    aibgr::Matte src(4,1), out(16,4); src.at(0,0)=src.at(1,0)=1; src.at(2,0)=src.at(3,0)=0;
+    aibgr::resizeEdgeAware(src,low,high,out);
+    CHECK(out.at(7,1)>0.99f); CHECK(out.at(8,1)<0.01f);
+    src.fill(0.4f); aibgr::resizeEdgeAware(src,low,high,out);
+    CHECK_NEAR(out.at(7,1),0.4,1e-6); CHECK_NEAR(out.at(8,1),0.4,1e-6);
+}

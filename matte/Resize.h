@@ -19,6 +19,9 @@ void resizeArea(const Matte& src, Matte& dst);
 /// Separable Catmull-Rom bicubic, output clamped to [0, 1].
 void resizeBicubic(const Matte& src, Matte& dst);
 
+/// Joint colour-aware upsample, guided by the full-resolution image. Dimensions must match.
+void resizeEdgeAware(const Matte& src, const FloatImage& lowGuide, const FloatImage& highGuide, Matte& dst);
+
 /// Separable bilinear. Provided mainly so tests can compare kernels.
 void resizeBilinear(const Matte& src, Matte& dst);
 

@@ -59,3 +59,32 @@ TEST(brush, guidedWithoutBothSeedClassesKeepsPrior) {
     CHECK(select.refine(image,matte,false).ok());
     CHECK_NEAR(matte.at(7,7),0.3,1e-6);
 }
+TEST(brush, simplificationAndExtendedDataRemainBoundedAndCompatible) {
+    BrushStroke line{true,5,{}};
+    for (int i=0;i<300;++i) line.points.push_back({double(i),0});
+    simplifyBrushStroke(line,0.4);
+    CHECK_EQ(line.points.size(),size_t(2)); CHECK_NEAR(line.points.back().x,299,1e-6);
+    BrushStroke corner{true,5,{{0,0},{10,0},{10,10}}}; simplifyBrushStroke(corner,0.4);
+    CHECK_EQ(corner.points.size(),size_t(3));
+    BrushStroke complex{true,3,{}};
+    for(int i=0;i<700;++i) complex.points.push_back({double(i),double(i%2)*4});
+    const std::string text=serialiseBrushStrokes({complex});
+    CHECK(text.find("AIBGR3 ")==0);
+    std::vector<BrushStroke> parsed; CHECK(parseBrushStrokes(text,parsed));
+    CHECK_EQ(parsed[0].points.size(),size_t(700));
+    BrushStroke tooLong{true,1,{}}; tooLong.points.resize(kMaxPointsPerStroke+1);
+    CHECK(!parseBrushStrokes(serialiseBrushStrokes({tooLong}),parsed));
+}
+TEST(brush, smallSeedSurvivesDownsampling) {
+    FloatImage image(640,640);
+    for(int y=0;y<640;++y) for(int x=0;x<640;++x) {
+        float* p=image.pixel(x,y); bool fg=x>=200 && x<440 && y>=200 && y<440;
+        p[0]=fg ? 0.8f : 0.1f; p[1]=0.1f; p[2]=fg ? 0.1f : 0.9f; p[3]=1;
+    }
+    Matte matte(640,640); matte.fill(0.1f);
+    FrameContext ctx; ctx.renderWindow={0,0,640,640};
+    GuidedSelection select;
+    select.configure({{true,1,{{240,240}}},{false,3,{{100,100}}}},ctx);
+    CHECK(select.refine(image,matte,false).ok());
+    CHECK(matte.at(400,400)>0.7f); // tiny green sample influences the unmarked subject
+}

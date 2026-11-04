@@ -383,6 +383,9 @@ Result defineParameters(OfxParamSetHandle paramSet, const std::vector<ModelChoic
     defineChoice(d, pname::kSelectionMode, "Viewer Selection Method (experimental)",
                  "Manual preserves existing painted corrections. Guided uses keep/remove markings and an optional outline to classify unmarked pixels. Approximate, not GIMP matting.",
                  pname::kGroupRefine, {"Manual corrections", "Guided selection"}, 0);
+    defineChoice(d, pname::kGuidedBrushBehavior, "Guided Brush Behaviour",
+                 "Direct corrections preserve the original behaviour. Samples only uses strokes as selection guidance without a full-resolution painted patch. Only affects Guided selection; both foreground and background samples are needed.",
+                 pname::kGroupRefine, {"Direct corrections + samples", "Samples only (experimental)"}, 0);
     defineChoice(d, pname::kBrushMode, "Viewer Brush (experimental)",
                  "Enable Open FX Overlay, then draw an outline or paint Keep/Remove markings. "
                  "In Manual mode paint directly changes the matte; Guided mode also estimates unmarked pixels.",

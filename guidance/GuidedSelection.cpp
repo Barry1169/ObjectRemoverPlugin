@@ -13,14 +13,6 @@ constexpr int kBins = 8;
 float channel(float v) { return std::isfinite(v) ? std::clamp(v, 0.0f, 1.0f) : 0.0f; }
 int bin(float v) { return std::min(kBins - 1, static_cast<int>(channel(v) * kBins)); }
 int idx(int r,int g,int b) { return (r*kBins+g)*kBins+b; }
-bool inside(const std::vector<BrushPoint>& p, double x, double y) {
-    bool result = false;
-    for (size_t i=0,j=p.size()-1; i<p.size(); j=i++) {
-        const auto a=p[i], b=p[j];
-        if ((a.y>y)!=(b.y>y) && x < (b.x-a.x)*(y-a.y)/(b.y-a.y)+a.x) result=!result;
-    }
-    return result;
-}
 float similarity(const float* a, const float* b) {
     float d=0; for(int c=0;c<3;++c) { const float v=channel(a[c])-channel(b[c]); d+=v*v; }
     return 0.02f + std::exp(-d * 20.0f);
@@ -52,19 +44,35 @@ Result GuidedSelection::refine(const FloatImage& image, Matte& matte, bool inver
         const size_t n=static_cast<size_t>(w)*h;
         std::vector<unsigned char> seed(n, 0); // 0 unknown, 1 keep, 2 remove
         std::array<float,512> fg{}, bg{}; size_t nf=0, nb=0;
-        for(int y=0;y<h;++y) for(int x=0;x<w;++x) {
+        std::vector<double> crossings;
+        for(int y=0;y<h;++y) {
+          // Intersect the outline once per scanline instead of testing every edge for each pixel.
+          crossings.clear();
+          if (outline) {
+            const double cy=((y+0.5)*image.height()/h+ctx_.renderWindow.y1)/sy;
+            const auto& points=outline->points;
+            for(size_t i=0,j=points.size()-1; i<points.size(); j=i++) {
+              const auto a=points[i], b=points[j];
+              if ((a.y>cy)!=(b.y>cy)) crossings.push_back((b.x-a.x)*(cy-a.y)/(b.y-a.y)+a.x);
+            }
+            std::sort(crossings.begin(),crossings.end());
+          }
+          for(int x=0;x<w;++x) {
             const size_t i=static_cast<size_t>(y)*w+x;
             const float mark=seedSmall_.at(x,y);
-            if (mark>0.8f) seed[i]=1;
-            else if (mark<0.2f) seed[i]=2;
+            // Preserve small strokes when full-resolution seeds are area-downsampled. A narrow
+            // line covering 4% of a cell should still be a useful sample, not disappear.
+            if (mark>0.52f) seed[i]=1;
+            else if (mark<0.48f) seed[i]=2;
             else if (outline) {
                 const double cx=((x+0.5)*image.width()/w+ctx_.renderWindow.x1)/sx;
-                const double cy=((y+0.5)*image.height()/h+ctx_.renderWindow.y1)/sy;
-                if (!inside(outline->points,cx,cy)) seed[i]=2;
+                const auto after=std::upper_bound(crossings.begin(),crossings.end(),cx);
+                if ((crossings.end()-after)%2 == 0) seed[i]=2;
             }
             const float* p=smallImage_.pixel(x,y); const int b=idx(bin(p[0]),bin(p[1]),bin(p[2]));
             if (seed[i]==1) { fg[b]++; ++nf; }
             if (seed[i]==2) { bg[b]++; ++nb; }
+          }
         }
         // Without both classes, the current AI/key matte remains the baseline.
         if (!nf || !nb) return Result::success();
@@ -110,7 +118,7 @@ Result GuidedSelection::refine(const FloatImage& image, Matte& matte, bool inver
         }
         resultSmall_.resize(w,h);
         for(size_t i=0;i<n;++i) resultSmall_.data()[i]=inverted ? 1.0f-curr[i] : curr[i];
-        resultFull_.resize(image.width(),image.height()); resizeBicubic(resultSmall_,resultFull_);
+        resultFull_.resize(image.width(),image.height()); resizeEdgeAware(resultSmall_,smallImage_,image,resultFull_);
         std::copy(resultFull_.data(),resultFull_.data()+resultFull_.floatCount(),matte.data());
         return Result::success();
     } catch (const std::exception& e) { return Result::fail(Status::BackendError,e.what()); }

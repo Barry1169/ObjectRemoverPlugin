@@ -8,7 +8,12 @@
 namespace aibgr {
 struct BrushPoint { double x = 0, y = 0; };
 struct BrushStroke { bool keep = true; double radius = 20; std::vector<BrushPoint> points; bool outline = false; };
-constexpr size_t kMaxBrushPoints = 512;
+// Hard limits keep host-supplied project data and render work bounded.
+constexpr size_t kMaxBrushPoints = 8192;
+constexpr size_t kMaxPointsPerStroke = 4096;
+constexpr size_t kLegacyBrushPoints = 512;
+/// Simplify a newly drawn polyline without moving its points more than tolerance.
+void simplifyBrushStroke(BrushStroke& stroke, double tolerance);
 /// Persisted data uses canonical OFX coordinates so proxies and non-zero image origins work.
 bool parseBrushStrokes(const std::string& text, std::vector<BrushStroke>& result);
 std::string serialiseBrushStrokes(const std::vector<BrushStroke>& strokes);

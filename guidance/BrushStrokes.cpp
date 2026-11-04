@@ -10,15 +10,15 @@ namespace aibgr {
 bool parseBrushStrokes(const std::string& text, std::vector<BrushStroke>& out) {
     out.clear();
     if (text.empty()) return true;
-    if (text.size() > 200000) return false;
+    if (text.size() > 400000) return false;
     std::istringstream in(text); in.imbue(std::locale::classic());
     std::string version; size_t count = 0;
-    if (!(in >> version >> count) || (version != "AIBGR1" && version != "AIBGR2") || count > kMaxBrushPoints) return false;
+    if (!(in >> version >> count) || (version != "AIBGR1" && version != "AIBGR2" && version != "AIBGR3") || count > kMaxBrushPoints) return false;
     size_t total = 0;
     for (size_t i = 0; i < count; ++i) {
         char kind = 0; double radius = 0; size_t n = 0;
-        if (!(in >> kind >> radius >> n) || (kind != 'K' && kind != 'R' && !(kind == 'L' && version == "AIBGR2")) || !std::isfinite(radius) ||
-            radius <= 0 || radius > 200 || n == 0 || n > kMaxBrushPoints - total) { out.clear(); return false; }
+        if (!(in >> kind >> radius >> n) || (kind != 'K' && kind != 'R' && !(kind == 'L' && version != "AIBGR1")) || !std::isfinite(radius) ||
+            radius <= 0 || radius > 200 || n == 0 || n > kMaxPointsPerStroke || n > kMaxBrushPoints - total) { out.clear(); return false; }
         BrushStroke stroke; stroke.keep = kind == 'K'; stroke.outline = kind == 'L'; stroke.radius = radius;
         for (size_t j = 0; j < n; ++j) {
             BrushPoint p;
@@ -35,12 +35,35 @@ bool parseBrushStrokes(const std::string& text, std::vector<BrushStroke>& out) {
 std::string serialiseBrushStrokes(const std::vector<BrushStroke>& strokes) {
     std::ostringstream out; out.imbue(std::locale::classic());
     const bool outlines = std::any_of(strokes.begin(), strokes.end(), [](const BrushStroke& s) { return s.outline; });
-    out << (outlines ? "AIBGR2 " : "AIBGR1 ") << strokes.size() << ' ' << std::fixed << std::setprecision(3);
+    size_t total=0; for (const auto& s : strokes) total+=s.points.size();
+    out << (total>kLegacyBrushPoints ? "AIBGR3 " : outlines ? "AIBGR2 " : "AIBGR1 ") << strokes.size() << ' ' << std::fixed << std::setprecision(3);
     for (const auto& s : strokes) {
         out << (s.outline ? 'L' : s.keep ? 'K' : 'R') << ' ' << s.radius << ' ' << s.points.size() << ' ';
         for (const auto& p : s.points) out << p.x << ' ' << p.y << ' ';
     }
     return out.str();
+}
+void simplifyBrushStroke(BrushStroke& stroke, double tolerance) {
+    auto& points=stroke.points;
+    if (points.size()<3 || !std::isfinite(tolerance) || tolerance<=0) return;
+    // Iterative Ramer-Douglas-Peucker; recursion is avoided for hostile/complex input.
+    std::vector<unsigned char> keep(points.size(),0); keep.front()=keep.back()=1;
+    std::vector<std::pair<size_t,size_t>> ranges{{0,points.size()-1}};
+    const double limit=tolerance*tolerance;
+    while(!ranges.empty()) {
+        const auto [first,last]=ranges.back(); ranges.pop_back();
+        const auto a=points[first], b=points[last];
+        const double dx=b.x-a.x,dy=b.y-a.y,len=dx*dx+dy*dy;
+        double farthest=limit; size_t index=0;
+        for(size_t i=first+1;i<last;++i) {
+            const double t=len>0 ? std::clamp(((points[i].x-a.x)*dx+(points[i].y-a.y)*dy)/len,0.0,1.0) : 0.0;
+            const double x=points[i].x-(a.x+t*dx), y=points[i].y-(a.y+t*dy), d=x*x+y*y;
+            if(d>farthest) { farthest=d; index=i; }
+        }
+        if(index) { keep[index]=1; ranges.emplace_back(first,index); ranges.emplace_back(index,last); }
+    }
+    size_t dest=0; for(size_t i=0;i<points.size();++i) if(keep[i]) points[dest++]=points[i];
+    points.resize(dest);
 }
 Result BrushCorrections::apply(Matte& matte, bool inverted) const {
     if (matte.empty()) return Result::success();
