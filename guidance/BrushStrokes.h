@@ -7,7 +7,7 @@
 
 namespace aibgr {
 struct BrushPoint { double x = 0, y = 0; };
-struct BrushStroke { bool keep = true; double radius = 20; std::vector<BrushPoint> points; };
+struct BrushStroke { bool keep = true; double radius = 20; std::vector<BrushPoint> points; bool outline = false; };
 constexpr size_t kMaxBrushPoints = 512;
 /// Persisted data uses canonical OFX coordinates so proxies and non-zero image origins work.
 bool parseBrushStrokes(const std::string& text, std::vector<BrushStroke>& result);

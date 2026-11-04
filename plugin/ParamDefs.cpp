@@ -380,10 +380,13 @@ Result defineParameters(OfxParamSetHandle paramSet, const std::vector<ModelChoic
                  "the model clipped; a small negative value kills a bright fringe.",
                  pname::kGroupRefine, 0.0, -0.5, 0.5, -0.2, 0.2);
 
+    defineChoice(d, pname::kSelectionMode, "Viewer Selection Method (experimental)",
+                 "Manual preserves existing painted corrections. Guided uses keep/remove markings and an optional outline to classify unmarked pixels. Approximate, not GIMP matting.",
+                 pname::kGroupRefine, {"Manual corrections", "Guided selection"}, 0);
     defineChoice(d, pname::kBrushMode, "Viewer Brush (experimental)",
-                 "Select Keep or Remove, enable Open FX Overlay in the viewer, then paint. "
-                 "Paint directly changes the matte where touched; it does not detect edges.",
-                 pname::kGroupRefine, {"Off", "Keep (green)", "Remove (red)"}, 0);
+                 "Enable Open FX Overlay, then draw an outline or paint Keep/Remove markings. "
+                 "In Manual mode paint directly changes the matte; Guided mode also estimates unmarked pixels.",
+                 pname::kGroupRefine, {"Off", "Keep (green)", "Remove (red)", "Outline (guided)"}, 0);
     defineDouble(d, pname::kBrushRadius, "Viewer Brush Radius",
                  "Brush radius in full-resolution image pixels.", pname::kGroupRefine,
                  25.0, 1.0, 200.0, 1.0, 150.0);

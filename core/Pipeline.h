@@ -39,6 +39,13 @@ public:
     virtual Result apply(Matte& matte, bool inverted = false) const = 0;
 };
 
+/// Optional interactive selection algorithm that can use the image and the current matte.
+class MatteRefiner {
+public:
+    virtual ~MatteRefiner() = default;
+    virtual Result refine(const FloatImage& image, Matte& matte, bool inverted) = 0;
+};
+
 /// The built-in border-colour key, wrapped as a MatteSource.
 class FallbackKeyMatteSource final : public MatteSource {
 public:
@@ -92,6 +99,7 @@ public:
     MatteSource* matteSource() const noexcept { return matteSource_; }
     void setMatteOverride(const MatteOverride* value) noexcept { matteOverride_ = value; }
     void setBrushOverride(const MatteOverride* value) noexcept { brushOverride_ = value; }
+    void setSelectionRefiner(MatteRefiner* value) noexcept { selectionRefiner_ = value; }
 
     void setAbortChecker(const AbortChecker* checker) noexcept { abortChecker_ = checker; }
 
@@ -119,6 +127,7 @@ private:
     MatteSource* matteSource_ = nullptr;
     const MatteOverride* matteOverride_ = nullptr;
     const MatteOverride* brushOverride_ = nullptr;
+    MatteRefiner* selectionRefiner_ = nullptr;
     std::unique_ptr<FallbackKeyMatteSource> fallback_;
     const AbortChecker* abortChecker_ = nullptr;
 

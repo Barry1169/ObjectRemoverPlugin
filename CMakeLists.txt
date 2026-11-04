@@ -170,6 +170,7 @@ add_library(aibgr_core STATIC
   inference/U2NetSegmenter.cpp
   guidance/CorrectionMask.cpp
   guidance/BrushStrokes.cpp
+  guidance/GuidedSelection.cpp
   composite/Compositor.cpp
 )
 target_include_directories(aibgr_core

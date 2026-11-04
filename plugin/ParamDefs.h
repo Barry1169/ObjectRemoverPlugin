@@ -28,6 +28,7 @@ constexpr const char* kEdgeFeather = "edgeFeather";
 constexpr const char* kEdgeExpansion = "edgeExpansion";
 constexpr const char* kEdgeSmoothing = "edgeSmoothing";
 constexpr const char* kShiftMatte = "shiftMatte";
+constexpr const char* kSelectionMode = "viewerSelectionMode";
 constexpr const char* kBrushMode = "viewerBrushMode";
 constexpr const char* kBrushRadius = "viewerBrushRadius";
 constexpr const char* kBrushData = "viewerBrushData";

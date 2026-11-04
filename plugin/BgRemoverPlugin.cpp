@@ -173,6 +173,7 @@ Result PluginInstance::readSettings(double time, PipelineSettings& out, std::str
 void PluginInstance::clearCache() {
     std::lock_guard<std::mutex> lock(scratchMutex_);
     pipeline_->releaseBuffers();
+    selection_.releaseBuffers();
     guidance_.clear();
     pipeline_->setMatteOverride(nullptr);
     srcFloat_.release();
@@ -407,10 +408,12 @@ Result PluginInstance::render(double time, OfxPropertySetHandle inArgs) {
     }
 
     std::string guidancePath, brushData;
+    int selectionMode = 0;
     if (paramSet_) {
         const ParamReader p(bridge.params(), paramSet_);
         p.getString(pname::kGuidancePath, time, guidancePath);
         p.getString(pname::kBrushData, time, brushData);
+        p.getInt(pname::kSelectionMode, time, selectionMode);
     }
 
     Result outcome = Result::success();
@@ -451,6 +454,10 @@ Result PluginInstance::render(double time, OfxPropertySetHandle inArgs) {
             pipeline_->setMatteOverride(guide.ok() && guidance_.ready() ? &guidance_ : nullptr);
             std::vector<BrushStroke> strokes;
             if (!parseBrushStrokes(brushData, strokes)) AIBGR_LOGE("invalid saved brush data; ignoring strokes");
+            if (selectionMode == 1 && !strokes.empty()) {
+                selection_.configure(strokes, ctx);
+                pipeline_->setSelectionRefiner(&selection_);
+            } else pipeline_->setSelectionRefiner(nullptr);
             brush_.configure(std::move(strokes), ctx);
             pipeline_->setBrushOverride(brushData.empty() ? nullptr : &brush_);
             const Result proc = pipeline_->process(ctx, settings, srcFloat_, dstFloat_, lastStats_);

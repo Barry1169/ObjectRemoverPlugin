@@ -1,44 +1,59 @@
-# Experimental in-Resolve viewer brush
+# Experimental in-Resolve guided selection
 
-This first prototype lets you paint **direct matte corrections in Resolve**. It does not require
-GIMP, a PNG or any other application. **It is not yet GIMP's Foreground Select or an automatic
-edge-following algorithm**: paint changes only the pixels touched. Unpainted pixels keep the AI/key
-matte. This is a step toward an interactive selection workflow, not a promise that one stroke will
-select the whole tree or that fine edges are solved.
+The viewer tools work entirely inside Resolve. No GIMP, PNG or external editor is needed.
+**Guided selection is an experimental colour-and-edge classifier, not GIMP/GEGL's Foreground
+Select or an equivalent matting engine.** It uses your outline and markings to infer unmarked
+regions, but it can confuse similar colours, produce soft or rough edges, and miss thin branches.
+It needs testing on the actual image; do not assume it will recover the whole tree.
 
-## Try it on a still image
+## Trying the selection
 
-1. Back up your project and plugin bundle, close Resolve and install this build. Restart Resolve and
-   use a disposable test project; this new interaction has not been tested in Windows/Resolve yet.
-2. Apply AI Background Remover. Choose **U2NetP (AI, CPU)** for the starting matte, and open
-   **Matte Refinement**. Leave the optional Guidance PNG field empty.
-3. In the viewer's on-screen-controls menu, select **Open FX Overlay**. Select this effect in the
-   Inspector. Exact menu availability can vary by Resolve page and version.
-4. Set **Viewer Brush (experimental)** to **Keep (green)**. Adjust **Viewer Brush Radius**, then
-   drag over a small area of the tree that was incorrectly removed. Release the mouse and wait for
-   the CPU AI to re-render. The painted pixels should become visible. Use **Remove (red)** for sky
-   that AI mistakenly kept. Painting over sky in Keep mode keeps sky too; stay inside the desired
-   region. Soft edges are a narrow brush feather, not inferred object boundaries.
-5. Use **Undo Last Brush Stroke** or **Clear Viewer Brush Strokes** to correct mistakes. Set Viewer
-   Brush to **Off** to stop intercepting mouse clicks. To hide the visual stroke outlines, switch the
-   viewer away from Open FX Overlay; this should not disable the matte correction.
-6. Select **Output → Matte Only** to check the mask. Test saving, closing and reopening the project
-   before relying on it: strokes are stored in an OFX parameter, but persistence has only been tested
-   in a fake host. Also test the final full-resolution render.
+1. Back up the project and plugin bundle, close Resolve before installing, then test in a disposable
+   project. Choose **U2NetP (AI, CPU)** for the starting matte. The Guidance PNG field may stay empty.
+2. Select the effect and enable **Open FX Overlay** in the viewer. A small toolbar should appear
+   near the lower-left corner of the source image. Its nine buttons are **O L K R G − + U X**:
+   - **O**: stop drawing. **L**: rough outline and turn on guided selection. **K**: green keep
+     brush. **R**: red remove brush. **G**: toggle guided/manual selection.
+   - **− / +**: reduce/increase brush radius. **U**: undo last stroke/outline. **X**: clear all.
+     The Inspector retains the corresponding controls and shows the actual brush radius and
+     selection method. Toolbar controls require the host to provide a source region and viewer
+     pixel scale; use Inspector controls if the toolbar is not shown.
+3. Choose **L**. Drag one continuous rough loop around the entire tree, branches, buildings and
+   ground, leaving a margin; release to close it automatically. The latest outline is used. Its
+   outside supplies background samples. Then choose **K**, and mark representative foreground
+   colours, including branches, foliage, buildings and ground. If sky remains inside the outline,
+   choose **R** and mark representative sky colours. Start small and add strokes as needed. A
+   selection needs both foreground and background samples; until then the starting matte remains,
+   with ordinary painted corrections applied. The outline has no effect in Manual mode.
+4. Strokes/outline appear while dragging, then disappear on release; the saved corrections and
+   selection remain active. Wait for the CPU re-render. Choose **Output → Matte Only** to inspect the
+   result. Use **U** or **X** for mistakes and **O** to stop drawing. Switch Open FX Overlay off to
+   hide the toolbar too; it should not disable the matte.
+5. Verify saving/reopening, proxy/full-resolution alignment and the final export before relying on
+   it. The earlier direct brush has been exercised in Resolve 21; this new toolbar and guided
+   selector have only been tested with a simulated host, not in Resolve on Windows yet.
 
-## Limitations and troubleshooting
+## What it does and limitations
 
-- A host reporting `overlays=1` does not prove a usable drawing context or pen events. This prototype
-  registers the OFX 1.4 overlay interface and attempts to draw using the host's OpenGL context. If
-  Resolve does not supply one, outlines will not appear; check the log for `viewer overlay: OpenGL
-  context unavailable`, `viewer brush overlay registered`, `viewer brush: started` and `committed`.
-  Resolve may also not display the controls in every page or viewer. This must be tested on the
-  actual target machine; the fake host cannot prove mouse or graphics integration.
-- Brush strokes are static in image coordinates and do **not** track a moving subject or camera.
-  Image framing/transforms and host behavior may affect alignment; check both preview and export.
-- The combined stroke limit is 512 sampled points. If reached, use Undo or Clear. Big brushes and
-  many long strokes are slower; AI still runs on CPU per render.
-- Brush mode Off does not erase strokes. Existing saved projects start with no strokes and Off.
-  The PNG guidance feature remains available for compatibility, but is not needed here.
-- The prototype has no smart object selection, GIMP/GEGL matting, temporal propagation, or GPU
-  acceleration. Those require separate implementation, licensing and real-host verification.
+- In Guided mode, painted samples and the outside of the most recent outline build approximate
+  foreground/background colour models. A bounded 320-pixel-long-edge solver combines those models,
+  the AI/key matte and local colour edges to estimate unmarked pixels. Direct painted corrections
+  are then applied at full resolution. This is **not** GIMP's matting solver, and is not a
+  full-resolution or semantic object selector. Similar-coloured foreground and background, tiny
+  branches, textures and transparency are especially challenging. It can alter areas far from a
+  stroke. Always check the matte and final render.
+- The outline is straight-line connected, automatically closed and sampled roughly every 10
+  canonical pixels. Keep it loose and include everything you want. Red and green brush strokes
+  override the outline locally. A new outline replaces the previous one for selection, but undo
+  restores the earlier one.
+- The combined limit remains 512 sampled points; if a new stroke exceeds the limit it is discarded
+  and logged. Use fewer/shorter strokes, Undo or Clear. Errors are in the plugin log.
+- Marks are static image coordinates, **not motion tracking** or temporal propagation. The model
+  runs on CPU per frame; guided selection adds CPU work. Results may differ on proxies and exports.
+- Existing projects default to **Manual corrections** and retain their old brush behavior. The
+  plugin reads old saved strokes. A project containing a new outline uses a newer stroke-data format
+  which older plugin builds cannot read; save a separate project copy before downgrading.
+- Overlay drawing/interaction depends on Resolve page and viewer. If no controls appear, check the
+  log for `viewer overlay: OpenGL context unavailable`, `viewer brush overlay registered`,
+  `viewer brush: started` and `committed`. Inspector controls remain available. Undo and Clear
+  affect stored data, not merely the visible overlay.

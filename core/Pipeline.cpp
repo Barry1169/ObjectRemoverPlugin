@@ -210,6 +210,11 @@ Result Pipeline::process(const FrameContext& ctx, const PipelineSettings& settin
         stats.matteUpscaled = true;
     }
 
+    if (selectionRefiner_) {
+        const Result selected = selectionRefiner_->refine(*encoded, *finalMatte, effective.matteInvert);
+        if (!selected.ok()) AIBGR_LOGE("guided selection: %s", selected.toString().c_str());
+    }
+
     // Apply manual corrections at full resolution, so thin painted strokes are not
     // reduced to the AI model's 320-pixel input. On mismatch leave the base matte intact.
     if (matteOverride_) {

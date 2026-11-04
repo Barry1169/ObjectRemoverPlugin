@@ -60,7 +60,7 @@ struct FakeHost {
     int modelIndex = 0;
     std::string modelValue = "__fallback__";
     std::string guidancePath, brushData;
-    int brushMode = 0, redraws = 0;
+    int brushMode = 0, selectionMode = 0, redraws = 0;
     double brushRadius = 6;
     OfxImageEffectHandle effect() { return reinterpret_cast<OfxImageEffectHandle>(&effectToken); }
     OfxParamSetHandle paramSet() { return reinterpret_cast<OfxParamSetHandle>(&paramToken); }
@@ -84,6 +84,7 @@ OfxStatus getParameterAtTime(OfxParamHandle p, OfxTime time, ...) {
         std::strcmp(name, pname::kFallbackKeySoftness) != 0 &&
         std::strcmp(name, pname::kModel) != 0 &&
         std::strcmp(name, pname::kGuidancePath) != 0 &&
+        std::strcmp(name, pname::kSelectionMode) != 0 &&
         std::strcmp(name, pname::kBrushMode) != 0 &&
         std::strcmp(name, pname::kBrushRadius) != 0 &&
         std::strcmp(name, pname::kBrushData) != 0) return kOfxStatErrUnknown;
@@ -91,6 +92,8 @@ OfxStatus getParameterAtTime(OfxParamHandle p, OfxTime time, ...) {
     va_start(args, time);
     if (std::strcmp(name, pname::kBrushData) == 0) {
         char** result = va_arg(args, char**); *result = const_cast<char*>(current->brushData.c_str());
+    } else if (std::strcmp(name, pname::kSelectionMode) == 0) {
+        int* result = va_arg(args, int*); *result = current->selectionMode;
     } else if (std::strcmp(name, pname::kBrushMode) == 0) {
         int* result = va_arg(args, int*); *result = current->brushMode;
     } else if (std::strcmp(name, pname::kBrushRadius) == 0) {
@@ -125,10 +128,13 @@ OfxStatus setParameterAtTime(OfxParamHandle p, OfxTime, ...) {
 }
 OfxStatus setParameter(OfxParamHandle p, ...) {
     const char* name = reinterpret_cast<const char*>(p);
-    if (std::strcmp(name, pname::kBrushData) != 0) return kOfxStatErrUnknown;
+    if (std::strcmp(name, pname::kBrushData) && std::strcmp(name, pname::kBrushMode) && std::strcmp(name, pname::kSelectionMode)) return kOfxStatErrUnknown;
     va_list args; va_start(args, p);
-    const char* value = va_arg(args, const char*);
-    current->brushData = value ? value : ""; va_end(args);
+    if (!std::strcmp(name, pname::kBrushData)) {
+        const char* value = va_arg(args, const char*); current->brushData = value ? value : "";
+    } else if (!std::strcmp(name, pname::kBrushMode)) current->brushMode=va_arg(args,int);
+    else current->selectionMode=va_arg(args,int);
+    va_end(args);
     ++current->paramWrites;
     // Simulate a synchronous host notification for this user-initiated change.
     Properties changed; put(changed.strings, kOfxPropName, 0, std::string(name));
@@ -173,6 +179,7 @@ FakeHost::FakeHost() {
         if (propsOut) *propsOut = nullptr;
         return kOfxStatOK;
     };
+    fx.clipGetRegionOfDefinition = [](OfxImageClipHandle, OfxTime, OfxRectD* r) -> OfxStatus { *r={0,0,640,480}; return kOfxStatOK; };
     fx.clipGetImage = [](OfxImageClipHandle c, OfxTime, const OfxRectD*, OfxPropertySetHandle* out) -> OfxStatus {
         if (c == current->src() && !current->sourceAvailable) return kOfxStatFailed;
         *out = handle(c == current->src() ? current->sourceImage : current->outputImage); return kOfxStatOK;
@@ -189,7 +196,7 @@ FakeHost::FakeHost() {
             std::strcmp(name, pname::kShiftMatte) && std::strcmp(name, pname::kFallbackKeyTolerance) &&
             std::strcmp(name, pname::kFallbackKeySoftness) && std::strcmp(name, pname::kModel) &&
             std::strcmp(name, pname::kGuidancePath) && std::strcmp(name, pname::kBrushData) &&
-            std::strcmp(name, pname::kBrushMode) && std::strcmp(name, pname::kBrushRadius)) return kOfxStatErrUnknown;
+            std::strcmp(name, pname::kBrushMode) && std::strcmp(name, pname::kBrushRadius) && std::strcmp(name, pname::kSelectionMode)) return kOfxStatErrUnknown;
         *out = reinterpret_cast<OfxParamHandle>(const_cast<char*>(name)); return kOfxStatOK;
     };
     params.paramGetValueAtTime = getParameterAtTime;
@@ -425,4 +432,48 @@ TEST(ofxStability, viewerBrushPenActionsPersistAndRender) {
     CHECK_NEAR(host.output[(20*64+25)*4+3], 0.0, 1e-6);
     CHECK_EQ(brushOverlayMain(kOfxActionDestroyInstance, h, nullptr, nullptr), kOfxStatOK);
     CHECK_EQ(pluginMain(kOfxActionDestroyInstance, host.effect(), nullptr, nullptr), kOfxStatOK);
+}
+
+TEST(ofxStability, toolbarSelectsOutlineAndConsumesClick) {
+    FakeHost host; setModelUsesStrChoice(false);
+    CHECK_EQ(pluginMain(kOfxActionCreateInstance,host.effect(),nullptr,nullptr),kOfxStatOK);
+    Properties overlay, pen; overlay.pointers[kOfxPropEffectInstance]=host.effect();
+    pen.doubles[kOfxInteractPropPixelScale]={1,1};
+    pen.doubles[kOfxInteractPropPenPosition]={40,20}; // L button
+    const void* h=reinterpret_cast<const void*>(handle(overlay));
+    CHECK_EQ(brushOverlayMain(kOfxActionCreateInstance,h,nullptr,nullptr),kOfxStatOK);
+    CHECK_EQ(brushOverlayMain(kOfxInteractActionPenDown,h,handle(pen),nullptr),kOfxStatOK);
+    CHECK_EQ(brushOverlayMain(kOfxInteractActionPenUp,h,handle(pen),nullptr),kOfxStatOK);
+    CHECK_EQ(host.brushMode,3); CHECK_EQ(host.selectionMode,1); CHECK(host.brushData.empty());
+    pen.doubles[kOfxInteractPropPenPosition]={300,100};
+    CHECK_EQ(brushOverlayMain(kOfxInteractActionPenDown,h,handle(pen),nullptr),kOfxStatOK);
+    pen.doubles[kOfxInteractPropPenPosition]={400,100};
+    CHECK_EQ(brushOverlayMain(kOfxInteractActionPenMotion,h,handle(pen),nullptr),kOfxStatOK);
+    pen.doubles[kOfxInteractPropPenPosition]={400,200};
+    CHECK_EQ(brushOverlayMain(kOfxInteractActionPenUp,h,handle(pen),nullptr),kOfxStatOK);
+    std::vector<aibgr::BrushStroke> strokes; CHECK(aibgr::parseBrushStrokes(host.brushData,strokes));
+    CHECK_EQ(strokes.size(),size_t(1)); CHECK(strokes[0].outline);
+    CHECK_EQ(brushOverlayMain(kOfxActionDestroyInstance,h,nullptr,nullptr),kOfxStatOK);
+    CHECK_EQ(pluginMain(kOfxActionDestroyInstance,host.effect(),nullptr,nullptr),kOfxStatOK);
+}
+
+TEST(ofxStability, guidedModeRendersUnmarkedRegionsAndPersists) {
+    FakeHost host; setModelUsesStrChoice(false);
+    for (int y=0;y<64;++y) for(int x=0;x<64;++x) {
+        const size_t i=(y*64+x)*4; const bool subject=x>=16 && x<48 && y>=16 && y<48;
+        host.source[i]=subject ? 0.8f : 0.1f; host.source[i+1]=subject ? 0.1f : 0.2f;
+        host.source[i+2]=subject ? 0.1f : 0.9f; host.source[i+3]=1;
+    }
+    host.brushData=aibgr::serialiseBrushStrokes({{true,3,{{12,12},{52,12},{52,52},{12,52}},true}, {true,3,{{20,20}}}});
+    host.selectionMode=1;
+    CHECK_EQ(pluginMain(kOfxActionCreateInstance,host.effect(),nullptr,nullptr),kOfxStatOK);
+    CHECK_EQ(pluginMain(kOfxImageEffectActionRender,host.effect(),handle(host.args),nullptr),kOfxStatOK);
+    CHECK(host.output[(40*64+40)*4+3]>0.7f);
+    CHECK(host.output[(5*64+5)*4+3]<0.01f);
+    CHECK_EQ(host.paramWrites,0);
+    CHECK_EQ(pluginMain(kOfxActionDestroyInstance,host.effect(),nullptr,nullptr),kOfxStatOK);
+    CHECK_EQ(pluginMain(kOfxActionCreateInstance,host.effect(),nullptr,nullptr),kOfxStatOK);
+    CHECK_EQ(pluginMain(kOfxImageEffectActionRender,host.effect(),handle(host.args),nullptr),kOfxStatOK);
+    CHECK(host.output[(40*64+40)*4+3]>0.7f);
+    CHECK_EQ(pluginMain(kOfxActionDestroyInstance,host.effect(),nullptr,nullptr),kOfxStatOK);
 }

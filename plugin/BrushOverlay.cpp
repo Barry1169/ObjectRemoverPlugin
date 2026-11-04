@@ -24,7 +24,7 @@
 
 namespace aibgr::ofx {
 namespace {
-struct OverlayState { std::mutex mutex; bool dragging = false; BrushStroke current; };
+struct OverlayState { std::mutex mutex; bool dragging = false; bool buttonDown = false; bool overflow = false; BrushStroke current; };
 
 bool readStrokes(OfxParamSetHandle params, double time, std::vector<BrushStroke>& strokes) {
     const ParamReader p(HostBridge::instance().params(), params);
@@ -84,16 +84,60 @@ struct Gl {
     }
     bool usable() const { return getContext && getContext() && begin && end && vertex && colour && width && push && pop; }
 };
+struct Toolbar { double x, y, sx, sy; };
+bool toolbarGeometry(OfxImageEffectHandle effect, double time, const Props& args, const Props& props, Toolbar& bar) {
+    auto* fx=HostBridge::instance().effect();
+    if (!fx || !fx->clipGetHandle || !fx->clipGetRegionOfDefinition) return false;
+    OfxImageClipHandle clip=nullptr; OfxRectD rod{};
+    if (fx->clipGetHandle(effect, kOfxImageEffectSimpleSourceClipName, &clip, nullptr)!=kOfxStatOK || !clip ||
+        fx->clipGetRegionOfDefinition(clip,time,&rod)!=kOfxStatOK) return false;
+    bar.sx=args.getDouble(kOfxInteractPropPixelScale,0,props.getDouble(kOfxInteractPropPixelScale,0,0));
+    bar.sy=args.getDouble(kOfxInteractPropPixelScale,1,props.getDouble(kOfxInteractPropPixelScale,1,0));
+    if (!std::isfinite(bar.sx) || !std::isfinite(bar.sy) || bar.sx<=0 || bar.sy<=0 ||
+        !std::isfinite(rod.x1) || !std::isfinite(rod.y1) || !std::isfinite(rod.x2) || !std::isfinite(rod.y2) ||
+        rod.x2<=rod.x1 || rod.y2<=rod.y1 || bar.sx>1000 || bar.sy>1000) return false;
+    bar.x=rod.x1+8*bar.sx; bar.y=rod.y1+8*bar.sy; return true;
+}
+int toolbarHit(const Toolbar& b, OfxPointD p) {
+    const double x=(p.x-b.x)/b.sx, y=(p.y-b.y)/b.sy;
+    if (!std::isfinite(x) || !std::isfinite(y) || x<0 || x>=9*28 || y<0 || y>=26) return -1;
+    const int button=static_cast<int>(x/28); return x-button*28<26 ? button : -1;
+}
+void drawToolbar(const Toolbar& b, int mode, int guided) {
+    static Gl gl;
+    if (!gl.usable()) return;
+    // Simple line glyphs: O L K R G - + U X. Keeps the toolbar independent of fonts.
+    const char* glyphs[]={"024602", "046", "04 15 36", "0402 23 35 56", "0214 46 65 53", "25", "25 13", "04 46 62", "06 24"};
+    const double px[]={7,13,19,7,7,19,19};
+    const double py[]={19,19,19,13,7,13,7};
+    gl.push(0x00000001u | 0x00000004u); gl.width(1.5f);
+    for(int i=0;i<9;++i) {
+        const double x=b.x+i*28*b.sx;
+        const bool selected=(i==0&&mode==0)||(i==1&&mode==3)||(i==2&&mode==1)||(i==3&&mode==2)||(i==4&&guided==1);
+        if (selected) gl.colour(1.0f,0.8f,0.1f,1); else gl.colour(0.9f,0.9f,0.9f,1);
+        gl.begin(0x0002u); gl.vertex(x,b.y); gl.vertex(x+26*b.sx,b.y); gl.vertex(x+26*b.sx,b.y+26*b.sy); gl.vertex(x,b.y+26*b.sy); gl.end();
+        if (i==2) gl.colour(0.1f,1,0.2f,1); else if (i==3) gl.colour(1,0.2f,0.2f,1);
+        const char* g=glyphs[i]; bool drawing=false;
+        for(;*g;++g) {
+            if (*g==' ') { if(drawing) gl.end(); drawing=false; continue; }
+            if(!drawing) { gl.begin(0x0003u); drawing=true; }
+            int j=*g-'0'; gl.vertex(x+px[j]*b.sx,b.y+py[j]*b.sy);
+        }
+        if(drawing) gl.end();
+    }
+    gl.pop();
+}
 void drawStrokes(const std::vector<BrushStroke>& strokes) {
     static Gl gl;
     if (!gl.usable()) { static std::atomic<bool> reported{false}; if (!reported.exchange(true)) { AIBGR_LOGI("viewer overlay: OpenGL context unavailable; no brush overlay drawn"); } return; }
     gl.push(0x00000001u | 0x00000004u); // GL_CURRENT_BIT | GL_LINE_BIT
     gl.width(2.0f);
     for (const auto& s : strokes) {
-        gl.colour(s.keep ? 0.0f : 1.0f, s.keep ? 1.0f : 0.0f, 0.0f, 1.0f);
+        gl.colour(s.outline ? 1.0f : s.keep ? 0.0f : 1.0f, s.outline || s.keep ? 1.0f : 0.0f, 0.0f, 1.0f);
         gl.begin(0x0003u); // GL_LINE_STRIP
         for (const auto& p : s.points) gl.vertex(p.x,p.y);
         gl.end();
+        if (s.outline) continue;
         for (const auto& p : s.points) {
             gl.begin(0x0002u); // GL_LINE_LOOP
             for (int j=0; j<20; ++j) {
@@ -130,6 +174,8 @@ OfxStatus brushOverlayMain(const char* action, const void* handle, OfxPropertySe
         if (!std::strcmp(action, kOfxActionDescribe)) {
             props.setString(kOfxInteractPropSlaveToParam, 0, pname::kBrushData);
             props.setString(kOfxInteractPropSlaveToParam, 1, pname::kBrushMode);
+            props.setString(kOfxInteractPropSlaveToParam, 2, pname::kSelectionMode);
+            props.setString(kOfxInteractPropSlaveToParam, 3, pname::kBrushRadius);
             return kOfxStatOK;
         }
         if (!std::strcmp(action, kOfxActionCreateInstance)) {
@@ -154,31 +200,62 @@ OfxStatus brushOverlayMain(const char* action, const void* handle, OfxPropertySe
         const double time = args.getDouble(kOfxPropTime, 0, 0);
         if (!std::strcmp(action, kOfxInteractActionDraw)) {
             std::vector<BrushStroke> strokes;
-            readStrokes(params, time, strokes);
             {
                 std::lock_guard<std::mutex> lock(state->mutex);
                 if (state->dragging) strokes.push_back(state->current);
             }
-            drawStrokes(strokes); return kOfxStatOK;
+            drawStrokes(strokes);
+            Toolbar bar{};
+            if (toolbarGeometry(effect,time,args,props,bar)) {
+                int mode=0, guided=0; const ParamReader reader(bridge.params(),params);
+                reader.getInt(pname::kBrushMode,time,mode); reader.getInt(pname::kSelectionMode,time,guided);
+                drawToolbar(bar,mode,guided);
+            }
+            return kOfxStatOK;
         }
         if (!std::strcmp(action, kOfxInteractActionLoseFocus)) {
-            std::lock_guard<std::mutex> lock(state->mutex);
-            state->dragging = false; return kOfxStatReplyDefault;
+            { std::lock_guard<std::mutex> lock(state->mutex); state->dragging = false; state->buttonDown = false; }
+            if (suite->interactRedraw) suite->interactRedraw(interact);
+            return kOfxStatReplyDefault;
         }
         if (!std::strcmp(action, kOfxInteractActionPenDown)) {
-            int mode = 0; double radius = 25;
-            const ParamReader reader(bridge.params(), params);
-            reader.getInt(pname::kBrushMode, time, mode);
-            reader.getDouble(pname::kBrushRadius, time, radius);
-            if ((mode != 1 && mode != 2) || !std::isfinite(radius)) return kOfxStatReplyDefault;
             OfxPointD pos{};
             if (!penPosition(pos) || !std::isfinite(pos.x) || !std::isfinite(pos.y) || std::abs(pos.x)>1000000 || std::abs(pos.y)>1000000) return kOfxStatReplyDefault;
+            int mode = 0; double radius = 25;
+            const ParamReader reader(bridge.params(), params);
+            Toolbar bar{};
+            const int button=toolbarGeometry(effect,time,args,props,bar) ? toolbarHit(bar,pos) : -1;
+            if (button>=0) {
+                { std::lock_guard<std::mutex> lock(state->mutex); state->buttonDown=true; }
+                const auto* paramSuite=bridge.params();
+                auto setChoice=[&](const char* name, int value) {
+                    OfxParamHandle p=reader.handle(name);
+                    return p && paramSuite && paramSuite->paramSetValue && paramSuite->paramSetValue(p,value)==kOfxStatOK;
+                };
+                bool ok=true;
+                if(button<=3) {
+                    const int modes[]={0,3,1,2}; ok=setChoice(pname::kBrushMode,modes[button]);
+                    if(button==1) ok=setChoice(pname::kSelectionMode,1) && ok;
+                } else if(button==4) {
+                    int guided=0; reader.getInt(pname::kSelectionMode,time,guided);
+                    ok=setChoice(pname::kSelectionMode,guided==1 ? 0 : 1);
+                } else if(button==5 || button==6) {
+                    reader.getDouble(pname::kBrushRadius,time,radius);
+                    ok=std::isfinite(radius) && reader.setDouble(pname::kBrushRadius,time,std::clamp(radius*(button==5 ? 0.8 : 1.25),1.0,200.0));
+                } else editSavedBrush(params,time,button==8);
+                if(!ok) AIBGR_LOGE("viewer toolbar: host rejected parameter change");
+                if (suite->interactRedraw) suite->interactRedraw(interact);
+                return kOfxStatOK;
+            }
+            reader.getInt(pname::kBrushMode, time, mode);
+            reader.getDouble(pname::kBrushRadius, time, radius);
+            if ((mode != 1 && mode != 2 && mode != 3) || !std::isfinite(radius)) return kOfxStatReplyDefault;
             {
                 std::lock_guard<std::mutex> lock(state->mutex);
-                state->current = BrushStroke{}; state->current.keep = (mode == 1); state->current.radius = std::clamp(radius,1.0,200.0);
+                state->current = BrushStroke{}; state->overflow = false; state->current.keep = (mode == 1); state->current.outline = (mode == 3); state->current.radius = std::clamp(radius,1.0,200.0);
                 state->current.points.push_back({pos.x,pos.y}); state->dragging = true;
             }
-            AIBGR_LOGI("viewer brush: started %s stroke", mode == 1 ? "keep" : "remove");
+            AIBGR_LOGI("viewer brush: started %s stroke", mode == 1 ? "keep" : mode == 2 ? "remove" : "outline");
             if (suite->interactRedraw) suite->interactRedraw(interact);
             return kOfxStatOK;
         }
@@ -186,22 +263,29 @@ OfxStatus brushOverlayMain(const char* action, const void* handle, OfxPropertySe
             OfxPointD pos{};
             const bool havePosition = penPosition(pos);
             const bool isUp = !std::strcmp(action, kOfxInteractActionPenUp);
-            BrushStroke finished;
+            BrushStroke finished; bool overflow=false;
             {
                 std::lock_guard<std::mutex> lock(state->mutex);
+                if (state->buttonDown) { if (isUp) state->buttonDown=false; return kOfxStatOK; }
                 if (!state->dragging) return kOfxStatReplyDefault;
                 const auto& last = state->current.points.back();
                 if (havePosition && std::isfinite(pos.x) && std::isfinite(pos.y) && std::abs(pos.x)<=1000000 && std::abs(pos.y)<=1000000 &&
-                    state->current.points.size() < kMaxBrushPoints && std::hypot(pos.x-last.x,pos.y-last.y) > state->current.radius*0.2)
-                    state->current.points.push_back({pos.x,pos.y});
-                if (isUp) { state->dragging = false; finished = state->current; }
+                    std::hypot(pos.x-last.x,pos.y-last.y) > (state->current.outline ? 10.0 : state->current.radius*0.2)) {
+                    if (state->current.points.size() < kMaxBrushPoints) state->current.points.push_back({pos.x,pos.y});
+                    else state->overflow=true;
+                }
+                if (isUp) { state->dragging = false; finished = state->current; overflow=state->overflow; }
             }
             if (isUp) {
                 std::vector<BrushStroke> strokes;
                 if (readStrokes(params, time, strokes)) {
                     size_t count = finished.points.size();
                     for (const auto& s : strokes) count += s.points.size();
-                    if (count <= kMaxBrushPoints) {
+                    if (overflow) {
+                        AIBGR_LOGE("viewer brush: stroke exceeded point limit, discarded");
+                    } else if (finished.outline && finished.points.size() < 3) {
+                        AIBGR_LOGE("viewer selection: outline needs at least three points");
+                    } else if (count <= kMaxBrushPoints) {
                         strokes.push_back(std::move(finished));
                         if (!writeStrokes(params, strokes)) AIBGR_LOGE("viewer brush: host rejected saved stroke");
                         else AIBGR_LOGI("viewer brush: committed stroke with %zu points", strokes.back().points.size());

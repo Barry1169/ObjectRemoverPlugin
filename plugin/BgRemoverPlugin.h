@@ -14,6 +14,7 @@
 #include "inference/U2NetSegmenter.h"
 #include "guidance/CorrectionMask.h"
 #include "guidance/BrushStrokes.h"
+#include "guidance/GuidedSelection.h"
 #include "plugin/OfxImageAdapter.h"
 #include "util/Status.h"
 
@@ -110,6 +111,7 @@ private:
     std::unique_ptr<U2NetSegmenter> aiSegmenter_;
     CorrectionMask guidance_;
     BrushCorrections brush_;
+    GuidedSelection selection_;
     bool aiLoadAttempted_ = false;
     OfxAbortChecker abortChecker_;
 
