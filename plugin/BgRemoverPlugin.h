@@ -115,6 +115,7 @@ private:
     GuidedSelection selection_;
     BoxSelector boxSelection_;
     bool boxLoadAttempted_ = false, boxLoaded_ = false;
+    bool briaLoadAttempted_ = false, briaLoaded_ = false;
     bool aiLoadAttempted_ = false;
     OfxAbortChecker abortChecker_;
 
