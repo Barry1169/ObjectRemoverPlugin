@@ -386,9 +386,6 @@ Result defineParameters(OfxParamSetHandle paramSet, const std::vector<ModelChoic
     defineBool(d, pname::kBoxDetailRecovery, "AI Box: Recover More Detail (experimental)",
                "Tries an additional overlapping AI mask for add boxes to recover missing foliage and branches. It may also retain sky; turn off if the result is worse. Remove boxes are unchanged.",
                pname::kGroupRefine, false);
-    defineBool(d, pname::kBriaBoxSelection, "AI Box: BRIA Detail (non-commercial, experimental)",
-               "Use BRIA for add-box crops; remove boxes still use EfficientSAM. BRIA is restricted to non-commercial use without a separate BRIA license. It selects salient objects within the box and may include unwanted items. Requires the optional BRIA model.",
-               pname::kGroupRefine, false);
     defineChoice(d, pname::kGuidedBrushBehavior, "Guided Brush Behaviour",
                  "Direct corrections preserve the original behaviour. Samples only uses strokes as selection guidance without a full-resolution painted patch. Only affects Guided selection; both foreground and background samples are needed.",
                  pname::kGroupRefine, {"Direct corrections + samples", "Samples only (experimental)"}, 0);

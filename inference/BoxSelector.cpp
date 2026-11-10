@@ -7,7 +7,6 @@
 #include <array>
 #include <cmath>
 #include <cstring>
-#include <limits>
 #include <stdexcept>
 #include <vector>
 #if defined(_WIN32)
@@ -32,13 +31,12 @@ struct BoxSelector::Impl {
     void* library=nullptr;
 #endif
     const OrtApi* api=nullptr; OrtEnv* env=nullptr; OrtSessionOptions* options=nullptr;
-    OrtSession* encoder=nullptr; OrtSession* decoder=nullptr; OrtSession* bria=nullptr; OrtMemoryInfo* memory=nullptr;
+    OrtSession* encoder=nullptr; OrtSession* decoder=nullptr; OrtMemoryInfo* memory=nullptr;
     OrtValue* embedding=nullptr; uint64_t embeddingHash=0; bool embeddingValid=false;
     FloatImage scaled; Matte small, full; std::vector<float> input;
     uint64_t maskHash=0; bool maskValid=false;
     ~Impl() {
         if(api) { if(embedding) api->ReleaseValue(embedding); if(memory) api->ReleaseMemoryInfo(memory);
-            if(bria) api->ReleaseSession(bria);
             if(decoder) api->ReleaseSession(decoder);
             if(encoder) api->ReleaseSession(encoder);
             if(options) api->ReleaseSessionOptions(options);
@@ -75,73 +73,6 @@ struct BoxSelector::Impl {
         if(ni!=4||no<2) throw std::runtime_error("unexpected box decoder interface");
         check(api->CreateCpuMemoryInfo(OrtArenaAllocator,OrtMemTypeDefault,&memory));
     }
-    void loadBria(const std::string& model) {
-        if (bria) { api->ReleaseSession(bria); bria=nullptr; }
-#if defined(_WIN32)
-        const auto path=widen(model); if(path.empty()) throw std::runtime_error("invalid BRIA model path");
-        check(api->CreateSession(env,path.c_str(),options,&bria));
-#else
-        check(api->CreateSession(env,model.c_str(),options,&bria));
-#endif
-        size_t ni=0,no=0; check(api->SessionGetInputCount(bria,&ni)); check(api->SessionGetOutputCount(bria,&no));
-        if(ni!=1 || no<1) throw std::runtime_error("unexpected BRIA model interface");
-        OrtAllocator* allocator=nullptr; check(api->GetAllocatorWithDefaultOptions(&allocator));
-        char* inputName=nullptr; char* outputName=nullptr;
-        check(api->SessionGetInputName(bria,0,allocator,&inputName));
-        const bool goodInput=inputName && std::string(inputName)=="input";
-        if(inputName) check(api->AllocatorFree(allocator,inputName));
-        check(api->SessionGetOutputName(bria,0,allocator,&outputName));
-        const bool goodOutput=outputName && std::string(outputName)=="output";
-        if(outputName) check(api->AllocatorFree(allocator,outputName));
-        if(!goodInput || !goodOutput) throw std::runtime_error("unexpected BRIA tensor names");
-        maskValid=false;
-    }
-    // BRIA predicts salient content in the rectangle, not an interactive object prompt.
-    // Coordinates are in top-down model space. Other add boxes are combined in order.
-    void addBriaBox(float xa,float ya,float xb,float yb) {
-        if(!bria) throw std::runtime_error("BRIA model not installed");
-        constexpr int n=1024; constexpr size_t plane=size_t(n)*n;
-        const int w=scaled.width(), h=scaled.height();
-        const int x0=std::clamp(int(std::floor(xa)),0,w-1), x1=std::clamp(int(std::ceil(xb)),x0+1,w);
-        const int y0=std::clamp(int(std::floor(ya)),0,h-1), y1=std::clamp(int(std::ceil(yb)),y0+1,h);
-        const int cw=x1-x0, ch=y1-y0;
-        std::vector<float> pixels(plane*3);
-        // Pillow's bilinear resize: half-pixel centres and clamped crop edges.
-        for(int y=0;y<n;++y) for(int x=0;x<n;++x) {
-            const float fx=(x+0.5f)*cw/n-0.5f, fy=(y+0.5f)*ch/n-0.5f;
-            const int ix=int(std::floor(fx)), iy=int(std::floor(fy));
-            const int xA=std::clamp(ix,0,cw-1), xB=std::clamp(ix+1,0,cw-1);
-            const int yA=std::clamp(iy,0,ch-1), yB=std::clamp(iy+1,0,ch-1);
-            const float wx=fx-ix, wy=fy-iy;
-            for(int c=0;c<3;++c) {
-                auto sample=[&](int xx,int yy) { float v=scaled.pixel(x0+xx,h-1-(y0+yy))[c]; return std::isfinite(v)?std::clamp(v,0.0f,1.0f):0.0f; };
-                const float a=sample(xA,yA)*(1-wx)+sample(xB,yA)*wx;
-                const float b=sample(xA,yB)*(1-wx)+sample(xB,yB)*wx;
-                pixels[size_t(c)*plane+size_t(y)*n+x]=a*(1-wy)+b*wy-0.5f;
-            }
-        }
-        const int64_t dims[]={1,3,n,n}; Value inputValue{api}, outputValue{api};
-        check(api->CreateTensorWithDataAsOrtValue(memory,pixels.data(),pixels.size()*sizeof(float),dims,4,ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT,&inputValue.v));
-        const char* inputName="input"; const char* outputName="output"; const OrtValue* val=inputValue.v;
-        check(api->Run(bria,nullptr,&inputName,&val,1,&outputName,1,&outputValue.v));
-        shape(outputValue.v,{1,1,n,n},ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT);
-        float* prediction=nullptr; check(api->GetTensorMutableData(outputValue.v,reinterpret_cast<void**>(&prediction)));
-        if(!prediction) throw std::runtime_error("BRIA returned an empty mask");
-        float lo=std::numeric_limits<float>::infinity(),hi=-std::numeric_limits<float>::infinity();
-        for(size_t i=0;i<plane;++i) {
-            if(!std::isfinite(prediction[i])) throw std::runtime_error("BRIA returned non-finite mask");
-            lo=std::min(lo,prediction[i]); hi=std::max(hi,prediction[i]);
-        }
-        if(hi-lo < 1e-6f) throw std::runtime_error("BRIA returned a constant mask");
-        Matte raw(n,n), fitted(cw,ch);
-        for(int y=0;y<n;++y) for(int x=0;x<n;++x)
-            raw.at(x,n-1-y)=std::clamp((prediction[size_t(y)*n+x]-lo)/(hi-lo),0.0f,1.0f);
-        resizeBilinear(raw,fitted);
-        for(int y=0;y<ch;++y) for(int x=0;x<cw;++x) {
-            float& target=small.at(x0+x,h-y1+y);
-            target=std::max(target,fitted.at(x,y));
-        }
-    }
     void shape(OrtValue* v,const std::vector<int64_t>& expected, ONNXTensorElementDataType dtype) {
         if (!v) throw std::runtime_error("missing box model output");
         Shape s{api}; check(api->GetTensorTypeAndShape(v,&s.v)); size_t rank=0; ONNXTensorElementDataType type;
@@ -169,7 +100,7 @@ struct BoxSelector::Impl {
         shape(embedding,{1,256,64,64},ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT);
         embeddingHash=hash; embeddingValid=true;
     }
-    void calculate(const FloatImage& image,const std::vector<BrushStroke>& strokes,const FrameContext& ctx,bool inverted,bool recoverDetail,bool briaMode,Matte& matte) {
+    void calculate(const FloatImage& image,const std::vector<BrushStroke>& strokes,const FrameContext& ctx,bool inverted,bool recoverDetail,Matte& matte) {
         encode(image); const int w=scaled.width(),h=scaled.height();
         uint64_t hash=hashBytes(embeddingHash,&ctx.renderScaleX,sizeof(ctx.renderScaleX));
         hash=hashBytes(hash,&ctx.renderScaleY,sizeof(ctx.renderScaleY)); hash=hashBytes(hash,&ctx.pixelAspectX,sizeof(ctx.pixelAspectX));
@@ -178,7 +109,6 @@ struct BoxSelector::Impl {
         // Full-resolution pixels influence edge-aware upsampling even when the embedding is unchanged.
         hash=hashBytes(hash,image.data(),image.floatCount()*sizeof(float));
         hash=hashBytes(hash,&inverted,sizeof(inverted)); hash=hashBytes(hash,&recoverDetail,sizeof(recoverDetail));
-        hash=hashBytes(hash,&briaMode,sizeof(briaMode));
         const std::string key=serialiseBrushStrokes(strokes); hash=hashBytes(hash,key.data(),key.size());
         if(maskValid && hash==maskHash && full.width()==iw && full.height()==ih) { std::copy(full.data(),full.data()+full.floatCount(),matte.data()); return; }
         const double sx=ctx.renderScaleX/std::max(ctx.pixelAspectX,1e-8),sy=ctx.renderScaleY;
@@ -192,7 +122,6 @@ struct BoxSelector::Impl {
             const float x1=x(s.points[0].x), x2=x(s.points[1].x), y1=y(s.points[0].y), y2=y(s.points[1].y);
             if(std::abs(x1-x2)<1 || std::abs(y1-y2)<1) continue;
             if(s.keep) hasAdd=true;
-            if (briaMode && s.keep) { addBriaBox(std::min(x1,x2),std::min(y1,y2),std::max(x1,x2),std::max(y1,y2)); continue; }
             float coords[]={std::min(x1,x2),std::min(y1,y2),std::max(x1,x2),std::max(y1,y2)};
             float labels[]={2,3}; int64_t orig[]={h,w},pd[]={1,1,2,2},ld[]={1,1,2},od[]={2};
             Value pt{api},lab{api},size{api},mask{api},iou{api};
@@ -241,21 +170,11 @@ Result BoxSelector::open(const std::string& runtime,const std::string& encoder,c
         auto p=std::make_unique<Impl>(); p->load(runtime,encoder,decoder); impl_=std::move(p); return Result::success();
     } catch(const std::exception& e){return Result::fail(Status::BackendError,e.what());}
 }
-Result BoxSelector::openBria(const std::string& model) {
-    if(!impl_) return Result::fail(Status::InvalidState,"EfficientSAM is not loaded");
-    if(!fileExists(model)) return Result::fail(Status::NotFound,"BRIA model not installed");
-    try { impl_->loadBria(model); return Result::success(); }
-    catch(const std::exception& e) {
-        if (impl_->bria) { impl_->api->ReleaseSession(impl_->bria); impl_->bria=nullptr; }
-        impl_->maskValid=false;
-        return Result::fail(Status::BackendError,e.what());
-    }
-}
-void BoxSelector::configure(std::vector<BrushStroke> strokes,FrameContext ctx,bool recoverDetail,bool bria) { strokes_=std::move(strokes);ctx_=ctx;recoverDetail_=recoverDetail;bria_=bria; }
+void BoxSelector::configure(std::vector<BrushStroke> strokes,FrameContext ctx,bool recoverDetail) { strokes_=std::move(strokes);ctx_=ctx;recoverDetail_=recoverDetail; }
 Result BoxSelector::refine(const FloatImage& image,Matte& matte,bool inverted) {
     if(!impl_) return Result::fail(Status::InvalidState,"box model is not loaded");
     if(image.empty() || image.width()!=matte.width() || image.height()!=matte.height()) return Result::fail(Status::InvalidArgument,"image/matte mismatch");
-    try { impl_->calculate(image,strokes_,ctx_,inverted,recoverDetail_,bria_,matte); return Result::success(); }
+    try { impl_->calculate(image,strokes_,ctx_,inverted,recoverDetail_,matte); return Result::success(); }
     catch(const std::exception& e) { return Result::fail(Status::BackendError,e.what()); }
 }
 void BoxSelector::clearCache() noexcept { if(impl_) { impl_->maskValid=false;impl_->embeddingValid=false; if(impl_->embedding){impl_->api->ReleaseValue(impl_->embedding);impl_->embedding=nullptr;} impl_->scaled.release();impl_->small.release();impl_->full.release();std::vector<float>().swap(impl_->input); } }

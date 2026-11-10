@@ -31,7 +31,6 @@ constexpr const char* kShiftMatte = "shiftMatte";
 constexpr const char* kGuidedBrushBehavior = "guidedBrushBehavior";
 constexpr const char* kSelectionMode = "viewerSelectionMode";
 constexpr const char* kBoxDetailRecovery = "boxDetailRecovery";
-constexpr const char* kBriaBoxSelection = "briaBoxSelection";
 constexpr const char* kBrushMode = "viewerBrushMode";
 constexpr const char* kBrushRadius = "viewerBrushRadius";
 constexpr const char* kBrushData = "viewerBrushData";

@@ -195,7 +195,7 @@ void PluginInstance::resetTemporalState() {
 void PluginInstance::preloadModel() {
     // Defer external library initialization until the next render.
     std::lock_guard<std::mutex> lock(scratchMutex_);
-    aiLoadAttempted_ = false; boxLoadAttempted_ = false; briaLoadAttempted_ = false; briaLoaded_ = false;
+    aiLoadAttempted_ = false; boxLoadAttempted_ = false;
     AIBGR_LOGI("AI load retry requested; next render will initialize the model");
 }
 
@@ -409,7 +409,7 @@ Result PluginInstance::render(double time, OfxPropertySetHandle inArgs) {
     }
 
     std::string guidancePath, brushData;
-    int selectionMode = 0, brushBehavior = 0, recoverDetail = 0, briaMode = 0;
+    int selectionMode = 0, brushBehavior = 0, recoverDetail = 0;
     if (paramSet_) {
         const ParamReader p(bridge.params(), paramSet_);
         p.getString(pname::kGuidancePath, time, guidancePath);
@@ -417,7 +417,6 @@ Result PluginInstance::render(double time, OfxPropertySetHandle inArgs) {
         p.getInt(pname::kSelectionMode, time, selectionMode);
         p.getInt(pname::kGuidedBrushBehavior, time, brushBehavior);
         p.getInt(pname::kBoxDetailRecovery, time, recoverDetail);
-        p.getInt(pname::kBriaBoxSelection, time, briaMode);
     }
 
     Result outcome = Result::success();
@@ -474,14 +473,7 @@ Result PluginInstance::render(double time, OfxPropertySetHandle inArgs) {
                     if(boxLoaded_) AIBGR_LOGI("AI box selection loaded (EfficientSAM-Ti CPU)");
                     else AIBGR_LOGE("AI box selection unavailable: %s",loaded.toString().c_str());
                 }
-                if (boxLoaded_ && briaMode && !briaLoadAttempted_ && !ctx.thumbnailRender && !isPassThrough(settings)) {
-                    briaLoadAttempted_=true;
-                    const Result loaded=boxSelection_.openBria(joinPath(joinPath(workspaceDir(),"models"),"bria_rmbg14_quantized.onnx"));
-                    briaLoaded_=loaded.ok();
-                    if(briaLoaded_) AIBGR_LOGI("BRIA non-commercial detail model loaded (CPU)");
-                    else AIBGR_LOGE("BRIA model unavailable: %s",loaded.toString().c_str());
-                }
-                if(boxLoaded_ && (!briaMode || briaLoaded_)) { boxSelection_.configure(strokes,ctx,recoverDetail != 0,briaMode != 0); pipeline_->setSelectionRefiner(&boxSelection_); pipeline_->setSelectionOnly(true); }
+                if(boxLoaded_) { boxSelection_.configure(strokes,ctx,recoverDetail != 0); pipeline_->setSelectionRefiner(&boxSelection_); pipeline_->setSelectionOnly(true); }
                 else { pipeline_->setSelectionRefiner(nullptr); settings.enable=false; }
             } else pipeline_->setSelectionRefiner(nullptr);
             brush_.configure(std::move(strokes), ctx);

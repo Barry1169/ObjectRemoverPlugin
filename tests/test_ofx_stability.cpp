@@ -62,7 +62,7 @@ struct FakeHost {
     int modelIndex = 0;
     std::string modelValue = "__fallback__";
     std::string guidancePath, brushData, warning;
-    int brushMode = 0, selectionMode = 0, brushBehavior = 0, detailRecovery = 0, briaMode = 0, redraws = 0;
+    int brushMode = 0, selectionMode = 0, brushBehavior = 0, detailRecovery = 0, redraws = 0;
     double brushRadius = 6;
     OfxImageEffectHandle effect() { return reinterpret_cast<OfxImageEffectHandle>(&effectToken); }
     OfxParamSetHandle paramSet() { return reinterpret_cast<OfxParamSetHandle>(&paramToken); }
@@ -94,7 +94,6 @@ OfxStatus getParameterAtTime(OfxParamHandle p, OfxTime time, ...) {
         std::strcmp(name, pname::kGuidedBrushBehavior) != 0 &&
         std::strcmp(name, pname::kSelectionMode) != 0 &&
         std::strcmp(name, pname::kBoxDetailRecovery) != 0 &&
-        std::strcmp(name, pname::kBriaBoxSelection) != 0 &&
         std::strcmp(name, pname::kBrushMode) != 0 &&
         std::strcmp(name, pname::kBrushRadius) != 0 &&
         std::strcmp(name, pname::kBrushData) != 0) return kOfxStatErrUnknown;
@@ -108,8 +107,6 @@ OfxStatus getParameterAtTime(OfxParamHandle p, OfxTime time, ...) {
         int* result = va_arg(args, int*); *result = current->selectionMode;
     } else if (std::strcmp(name, pname::kBoxDetailRecovery) == 0) {
         int* result = va_arg(args, int*); *result = current->detailRecovery;
-    } else if (std::strcmp(name, pname::kBriaBoxSelection) == 0) {
-        int* result = va_arg(args, int*); *result = current->briaMode;
     } else if (std::strcmp(name, pname::kBrushMode) == 0) {
         int* result = va_arg(args, int*); *result = current->brushMode;
     } else if (std::strcmp(name, pname::kBrushRadius) == 0) {
@@ -144,7 +141,7 @@ OfxStatus setParameterAtTime(OfxParamHandle p, OfxTime, ...) {
 }
 OfxStatus setParameter(OfxParamHandle p, ...) {
     const char* name = reinterpret_cast<const char*>(p);
-    if (std::strcmp(name, pname::kBrushData) && std::strcmp(name, pname::kBrushMode) && std::strcmp(name, pname::kSelectionMode) && std::strcmp(name, pname::kBoxDetailRecovery) && std::strcmp(name, pname::kBriaBoxSelection) && std::strcmp(name, pname::kGuidedBrushBehavior)) return kOfxStatErrUnknown;
+    if (std::strcmp(name, pname::kBrushData) && std::strcmp(name, pname::kBrushMode) && std::strcmp(name, pname::kSelectionMode) && std::strcmp(name, pname::kBoxDetailRecovery) && std::strcmp(name, pname::kGuidedBrushBehavior)) return kOfxStatErrUnknown;
     va_list args; va_start(args, p);
     if (!std::strcmp(name, pname::kBrushData)) {
         const char* value = va_arg(args, const char*); current->brushData = value ? value : "";
@@ -214,7 +211,7 @@ FakeHost::FakeHost() {
             std::strcmp(name, pname::kShiftMatte) && std::strcmp(name, pname::kFallbackKeyTolerance) &&
             std::strcmp(name, pname::kFallbackKeySoftness) && std::strcmp(name, pname::kModel) &&
             std::strcmp(name, pname::kGuidancePath) && std::strcmp(name, pname::kBrushData) &&
-            std::strcmp(name, pname::kBrushMode) && std::strcmp(name, pname::kBrushRadius) && std::strcmp(name, pname::kSelectionMode) && std::strcmp(name, pname::kBoxDetailRecovery) && std::strcmp(name, pname::kBriaBoxSelection) && std::strcmp(name, pname::kGuidedBrushBehavior)) return kOfxStatErrUnknown;
+            std::strcmp(name, pname::kBrushMode) && std::strcmp(name, pname::kBrushRadius) && std::strcmp(name, pname::kSelectionMode) && std::strcmp(name, pname::kBoxDetailRecovery) && std::strcmp(name, pname::kGuidedBrushBehavior)) return kOfxStatErrUnknown;
         *out = reinterpret_cast<OfxParamHandle>(const_cast<char*>(name)); return kOfxStatOK;
     };
     params.paramGetValueAtTime = getParameterAtTime;
@@ -632,7 +629,6 @@ TEST(ofxStability, newEffectAndEmptyBoxModeDoNotApplyAutomaticModel) {
     CHECK(defineParameters(host.paramSet(), {{"u2netp", "U2NetP"}}).ok());
     CHECK_EQ(host.definitions[pname::kSelectionMode].ints[kOfxParamPropDefault][0],3);
     CHECK_EQ(host.definitions[pname::kBrushMode].ints[kOfxParamPropDefault][0],4);
-    CHECK_EQ(host.definitions[pname::kBriaBoxSelection].ints[kOfxParamPropDefault][0],0);
     CHECK_EQ(pluginMain(kOfxActionCreateInstance,host.effect(),nullptr,nullptr),kOfxStatOK);
     CHECK_EQ(pluginMain(kOfxImageEffectActionRender,host.effect(),handle(host.args),nullptr),kOfxStatOK);
     CHECK(host.output==host.source);
@@ -671,46 +667,5 @@ TEST(ofxStability, missingBoxModelPassesThroughInsteadOfApplyingOldEffect) {
     CHECK(host.source==host.output);
     PluginInstance* instance=findInstance(host.effect()); CHECK(instance!=nullptr);
     if(instance) { CHECK(instance->pipeline().matteSource()==nullptr); CHECK(instance->pipeline().selectionRefiner()==nullptr); }
-    CHECK_EQ(pluginMain(kOfxActionDestroyInstance,host.effect(),nullptr,nullptr),kOfxStatOK);
-}
-
-TEST(ofxStability, missingBriaPassesThroughEvenWhenSamAvailable) {
-    const auto dir=aibgr::joinPath(workspaceDir(),"models");
-    if(!aibgr::fileExists(aiRuntimePath()) || !aibgr::fileExists(aibgr::joinPath(dir,"efficientsam_ti_encoder.onnx")) ||
-       !aibgr::fileExists(aibgr::joinPath(dir,"efficientsam_ti_decoder.onnx")) || aibgr::fileExists(aibgr::joinPath(dir,"bria_rmbg14_quantized.onnx"))) return;
-    FakeHost host; setModelUsesStrChoice(false); host.selectionMode=2; host.briaMode=1;
-    host.brushData=aibgr::serialiseBrushStrokes({{true,1,{{8,8},{55,55}},false,true}});
-    CHECK_EQ(pluginMain(kOfxActionCreateInstance,host.effect(),nullptr,nullptr),kOfxStatOK);
-    CHECK_EQ(pluginMain(kOfxImageEffectActionRender,host.effect(),handle(host.args),nullptr),kOfxStatOK);
-    CHECK(host.source==host.output);
-    auto* instance=findInstance(host.effect()); CHECK(instance!=nullptr);
-    if(instance) CHECK(instance->pipeline().selectionRefiner()==nullptr);
-    host.briaMode=0; std::fill(host.output.begin(),host.output.end(),0);
-    CHECK_EQ(pluginMain(kOfxImageEffectActionRender,host.effect(),handle(host.args),nullptr),kOfxStatOK);
-    if(instance) CHECK(instance->pipeline().selectionRefiner()!=nullptr);
-    CHECK_EQ(pluginMain(kOfxActionDestroyInstance,host.effect(),nullptr,nullptr),kOfxStatOK);
-}
-
-TEST(ofxStability, briaBoxRendersWhenModelsProvided) {
-    const char* raw=std::getenv("AIBGR_TEST_BOX_TREE_RAW");
-    const auto dir=aibgr::joinPath(workspaceDir(),"models");
-    if(!raw || !std::getenv("AIBGR_TEST_BRIA") || !aibgr::fileExists(aiRuntimePath()) ||
-       !aibgr::fileExists(aibgr::joinPath(dir,"bria_rmbg14_quantized.onnx")) ||
-       !aibgr::fileExists(aibgr::joinPath(dir,"efficientsam_ti_encoder.onnx")) ||
-       !aibgr::fileExists(aibgr::joinPath(dir,"efficientsam_ti_decoder.onnx"))) return;
-    std::vector<float> pixels(size_t(1024)*574*4); std::ifstream file(raw,std::ios::binary);
-    file.read(reinterpret_cast<char*>(pixels.data()),static_cast<std::streamsize>(pixels.size()*sizeof(float)));
-    CHECK(file.good()); if(!file.good()) return;
-    FakeHost host; setModelUsesStrChoice(false); host.selectionMode=2; host.briaMode=1;
-    for(int y=0;y<64;++y) for(int x=0;x<64;++x) for(int c=0;c<4;++c)
-        host.source[(y*64+x)*4+c]=pixels[(size_t(y)*574/64*1024+size_t(x)*1024/64)*4+c];
-    host.brushData=aibgr::serialiseBrushStrokes({{true,1,{{6,0},{53,63}},false,true}});
-    CHECK_EQ(pluginMain(kOfxActionCreateInstance,host.effect(),nullptr,nullptr),kOfxStatOK);
-    CHECK_EQ(pluginMain(kOfxImageEffectActionRender,host.effect(),handle(host.args),nullptr),kOfxStatOK);
-    auto* instance=findInstance(host.effect()); CHECK(instance!=nullptr);
-    if(instance) CHECK(instance->pipeline().selectionRefiner()!=nullptr);
-    CHECK(host.output[(28*64+30)*4+3]>0.5f);
-    CHECK(host.output[(50*64+2)*4+3]<0.5f);
-    CHECK_EQ(host.paramWrites,0);
     CHECK_EQ(pluginMain(kOfxActionDestroyInstance,host.effect(),nullptr,nullptr),kOfxStatOK);
 }

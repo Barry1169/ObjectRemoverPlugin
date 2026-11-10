@@ -9,7 +9,6 @@ unproven fixed. The original colour-key fallback remains available.
 
 New instances start with the source image unchanged. Drag a loose AI add box to select;
 optional **DETAIL ON** tries to recover more foliage, but can retain unwanted background.
-A separate opt-in BRIA-assisted add-box mode is available under a non-commercial model license.
 See [08-ai-box-selection.md](08-ai-box-selection.md) for setup, controls and limitations.
 The new detail recovery and labelled toolbar still require Windows/Resolve validation.
 
