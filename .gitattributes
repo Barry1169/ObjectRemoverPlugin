@@ -1,0 +1,21 @@
+# SPDX-License-Identifier: MIT
+#
+# Keep binaries byte-exact. Without this, a checkout on Windows with core.autocrlf=true
+# can rewrite a PDF or an .onnx file and silently corrupt it.
+*.pdf  -text
+*.png  -text
+*.jpg  -text
+*.ico  -text
+*.onnx -text
+*.dll  -text
+*.ofx  -text
+*.zip  -text
+
+# Source and docs are always LF in the repository; let each platform decide the working copy.
+* text=auto
+
+# cmd.exe can mis-parse multi-line parenthesised blocks in an LF-only batch file, so these are
+# checked out with CRLF no matter what core.autocrlf says.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
