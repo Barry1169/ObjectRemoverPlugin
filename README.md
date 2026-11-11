@@ -38,9 +38,8 @@ final render, project reload and proxy/full-resolution alignment yourself.
 ## Installation for a new user (Windows x64)
 
 There is currently **no ready-made installer or prebuilt release** in these
-instructions: users build the plugin from source. The steps below target the
-current experimental branch; the default `main` branch does not yet contain this
-implementation. Do not remove an existing installation without backing it up.
+instructions: users build the plugin from source. The steps below use the default
+`main` branch. Do not remove an existing installation without backing it up.
 
 ### 1. Prerequisites
 
@@ -60,7 +59,7 @@ another writable location if needed. In an **x64 Native Tools Command Prompt**, 
 ```bat
 mkdir C:\AI-Effects
 cd /d C:\AI-Effects
-git clone --branch arena/1596de21-objectremoverplugin https://github.com/Barry1169/ObjectRemoverPlugin.git
+git clone https://github.com/Barry1169/ObjectRemoverPlugin.git
 git clone https://github.com/AcademySoftwareFoundation/openfx.git
 cd /d C:\AI-Effects\ObjectRemoverPlugin
 set "OPENFX_SDK_DIR=C:\AI-Effects\openfx"
