@@ -7,7 +7,20 @@
 
 namespace aibgr {
 struct BrushPoint { double x = 0, y = 0; };
-struct BrushStroke { bool keep = true; double radius = 20; std::vector<BrushPoint> points; bool outline = false; bool box = false; };
+struct BrushStroke {
+    bool keep = true;
+    double radius = 20;
+    std::vector<BrushPoint> points;
+    bool outline = false;
+    /// AI box prompt: exactly two points, stored as the dragged rectangle's corners.
+    bool box = false;
+    /// AI point prompt: exactly one point. Sent to the decoder as a positive point; `keep`
+    /// decides whether its mask is unioned into the selection or subtracted from it.
+    bool point = false;
+};
+/// True for the two AI prompt kinds (boxes and points). Both are persisted in the stroke list and
+/// both count towards the 32-prompt limit.
+inline bool isAiPrompt(const BrushStroke& stroke) noexcept { return stroke.box || stroke.point; }
 // Hard limits keep host-supplied project data and render work bounded.
 constexpr size_t kMaxBrushPoints = 8192;
 constexpr size_t kMaxPointsPerStroke = 4096;

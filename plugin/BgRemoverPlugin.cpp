@@ -437,9 +437,14 @@ Result PluginInstance::render(double time, OfxPropertySetHandle inArgs) {
         } else {
             std::vector<BrushStroke> strokes;
             if (!parseBrushStrokes(brushData, strokes)) AIBGR_LOGE("invalid saved brush data; ignoring strokes");
-            const bool hasBox = std::any_of(strokes.begin(),strokes.end(),[](const BrushStroke& s){return s.box && s.keep;});
-            // Ready and empty box modes must never run either the old AI or colour key.
-            if (selectionMode == 3 || (selectionMode == 2 && !hasBox)) settings.enable = false;
+            // A point prompt selects exactly like a box prompt, so both count as an AI prompt and
+            // both activate the selector.
+            const bool hasPrompt = std::any_of(strokes.begin(), strokes.end(),
+                                               [](const BrushStroke& s) {
+                                                   return isAiPrompt(s) && s.keep;
+                                               });
+            // Ready and prompt-free AI modes must never run either the old AI or the colour key.
+            if (selectionMode == 3 || (selectionMode == 2 && !hasPrompt)) settings.enable = false;
             const bool useAi = selectionMode != 2 && selectionMode != 3 && settings.model == ModelId::SmallMatte && !isPassThrough(settings) && !ctx.thumbnailRender;
             if (useAi && !aiSegmenter_ && !aiLoadAttempted_) {
                 aiLoadAttempted_ = true;
@@ -464,7 +469,7 @@ Result PluginInstance::render(double time, OfxPropertySetHandle inArgs) {
             if (selectionMode == 1 && !strokes.empty()) {
                 selection_.configure(strokes, ctx);
                 pipeline_->setSelectionRefiner(&selection_);
-            } else if (selectionMode == 2 && hasBox) {
+            } else if (selectionMode == 2 && hasPrompt) {
                 if (!boxLoadAttempted_ && !ctx.thumbnailRender && !isPassThrough(settings)) {
                     boxLoadAttempted_=true;
                     const auto models=joinPath(workspaceDir(),"models");

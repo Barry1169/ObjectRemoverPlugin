@@ -22,7 +22,7 @@ void GuidedSelection::releaseBuffers() noexcept {
     smallImage_.release(); seedFull_.release(); seedSmall_.release(); priorSmall_.release();
     resultSmall_.release(); resultFull_.release();
 }
-Result GuidedSelection::refine(const FloatImage& image, Matte& matte, bool inverted) {
+Result GuidedSelection::refine(const FloatImage& image, Matte& matte) {
     try {
         if (image.empty() || matte.width()!=image.width() || matte.height()!=image.height())
             return Result::fail(Status::InvalidArgument, "image/matte dimensions differ");
@@ -93,7 +93,8 @@ Result GuidedSelection::refine(const FloatImage& image, Matte& matte, bool inver
         for(int y=0;y<h;++y) for(int x=0;x<w;++x) {
             const size_t i=static_cast<size_t>(y)*w+x; const float* p=smallImage_.pixel(x,y);
             const int b=idx(bin(p[0]),bin(p[1]),bin(p[2]));
-            const float total=fgs[b]+bgs[b], prior=inverted ? 1.0f-priorSmall_.at(x,y) : priorSmall_.at(x,y);
+            // The prior is subject alpha, like everything else a refiner reads and writes.
+            const float total=fgs[b]+bgs[b], prior=priorSmall_.at(x,y);
             // Unknown colours retain AI's opinion; sampled colours influence the uncertain area.
             const float confidence=total/(total+0.001f);
             const float colour=total>0 ? fgs[b]/total : prior;
@@ -117,7 +118,7 @@ Result GuidedSelection::refine(const FloatImage& image, Matte& matte, bool inver
             curr.swap(next);
         }
         resultSmall_.resize(w,h);
-        for(size_t i=0;i<n;++i) resultSmall_.data()[i]=inverted ? 1.0f-curr[i] : curr[i];
+        for(size_t i=0;i<n;++i) resultSmall_.data()[i]=curr[i];
         resultFull_.resize(image.width(),image.height()); resizeEdgeAware(resultSmall_,smallImage_,image,resultFull_);
         std::copy(resultFull_.data(),resultFull_.data()+resultFull_.floatCount(),matte.data());
         return Result::success();

@@ -566,6 +566,33 @@ TEST(ofxStability, aiBoxInteractionStoresRectAndKeepsLegacyStrokes) {
     CHECK_EQ(pluginMain(kOfxActionDestroyInstance,host.effect(),nullptr,nullptr),kOfxStatOK);
 }
 
+TEST(ofxStability, aiPointPromptStoresOnePointAndActivatesBoxMode) {
+    FakeHost host; setModelUsesStrChoice(false); host.brushMode=6;
+    CHECK_EQ(pluginMain(kOfxActionCreateInstance,host.effect(),nullptr,nullptr),kOfxStatOK);
+    Properties overlay, pen; overlay.pointers[kOfxPropEffectInstance]=host.effect();
+    pen.doubles[kOfxInteractPropPenPosition]={300,100};
+    const void* h=reinterpret_cast<const void*>(handle(overlay));
+    CHECK_EQ(brushOverlayMain(kOfxActionCreateInstance,h,nullptr,nullptr),kOfxStatOK);
+    CHECK_EQ(brushOverlayMain(kOfxInteractActionPenDown,h,handle(pen),nullptr),kOfxStatOK);
+    pen.doubles[kOfxInteractPropPenPosition]={310,120}; // a point prompt follows the pen
+    CHECK_EQ(brushOverlayMain(kOfxInteractActionPenMotion,h,handle(pen),nullptr),kOfxStatOK);
+    CHECK_EQ(brushOverlayMain(kOfxInteractActionPenUp,h,handle(pen),nullptr),kOfxStatOK);
+    CHECK_EQ(host.selectionMode,2);
+    std::vector<aibgr::BrushStroke> strokes; CHECK(aibgr::parseBrushStrokes(host.brushData,strokes));
+    CHECK_EQ(strokes.size(),size_t(1));
+    CHECK(strokes[0].point); CHECK(!strokes[0].box); CHECK(strokes[0].keep);
+    CHECK_EQ(strokes[0].points.size(),size_t(1));
+    CHECK(host.brushData.find("AIBGR5 ")==0);
+    // Remove point: same storage kind, keep=false, still one point.
+    host.brushMode=7;
+    CHECK_EQ(brushOverlayMain(kOfxInteractActionPenDown,h,handle(pen),nullptr),kOfxStatOK);
+    CHECK_EQ(brushOverlayMain(kOfxInteractActionPenUp,h,handle(pen),nullptr),kOfxStatOK);
+    CHECK(aibgr::parseBrushStrokes(host.brushData,strokes));
+    CHECK_EQ(strokes.size(),size_t(2)); CHECK(strokes[1].point); CHECK(!strokes[1].keep);
+    CHECK_EQ(brushOverlayMain(kOfxActionDestroyInstance,h,nullptr,nullptr),kOfxStatOK);
+    CHECK_EQ(pluginMain(kOfxActionDestroyInstance,host.effect(),nullptr,nullptr),kOfxStatOK);
+}
+
 TEST(ofxStability, realAiBoxModeRendersWhenModelsProvided) {
     const char* raw=std::getenv("AIBGR_TEST_BOX_TREE_RAW");
     if(!raw || !std::getenv("AIBGR_TEST_BOX_ENCODER")) return;
@@ -603,20 +630,28 @@ TEST(ofxStability, aiToolbarButtonsChooseAddAndSubtract) {
     CHECK_EQ(brushOverlayMain(kOfxInteractActionPenDown,h,handle(pen),nullptr),kOfxStatOK);
     CHECK_EQ(brushOverlayMain(kOfxInteractActionPenUp,h,handle(pen),nullptr),kOfxStatOK);
     CHECK_EQ(host.brushMode,5); CHECK_EQ(host.selectionMode,2); CHECK(host.brushData.empty());
-    pen.doubles[kOfxInteractPropPenPosition]={258,54}; // DETAIL + toggle
+    pen.doubles[kOfxInteractPropPenPosition]={258,54}; // ADD POINT
+    CHECK_EQ(brushOverlayMain(kOfxInteractActionPenDown,h,handle(pen),nullptr),kOfxStatOK);
+    CHECK_EQ(brushOverlayMain(kOfxInteractActionPenUp,h,handle(pen),nullptr),kOfxStatOK);
+    CHECK_EQ(host.brushMode,6); CHECK_EQ(host.selectionMode,2); CHECK(host.brushData.empty());
+    pen.doubles[kOfxInteractPropPenPosition]={378,54}; // REMOVE POINT
+    CHECK_EQ(brushOverlayMain(kOfxInteractActionPenDown,h,handle(pen),nullptr),kOfxStatOK);
+    CHECK_EQ(brushOverlayMain(kOfxInteractActionPenUp,h,handle(pen),nullptr),kOfxStatOK);
+    CHECK_EQ(host.brushMode,7); CHECK_EQ(host.selectionMode,2); CHECK(host.brushData.empty());
+    pen.doubles[kOfxInteractPropPenPosition]={18,18}; // DETAIL + toggle
     CHECK_EQ(brushOverlayMain(kOfxInteractActionPenDown,h,handle(pen),nullptr),kOfxStatOK);
     CHECK_EQ(brushOverlayMain(kOfxInteractActionPenUp,h,handle(pen),nullptr),kOfxStatOK);
     CHECK_EQ(host.detailRecovery,1); CHECK(host.brushData.empty());
     host.brushData=aibgr::serialiseBrushStrokes({{true,1,{{10,10},{20,20}},false,true}, {true,1,{{30,30},{40,40}},false,true}});
-    pen.doubles[kOfxInteractPropPenPosition]={18,18}; // UNDO
+    pen.doubles[kOfxInteractPropPenPosition]={138,18}; // UNDO
     CHECK_EQ(brushOverlayMain(kOfxInteractActionPenDown,h,handle(pen),nullptr),kOfxStatOK);
     CHECK_EQ(brushOverlayMain(kOfxInteractActionPenUp,h,handle(pen),nullptr),kOfxStatOK);
     std::vector<aibgr::BrushStroke> saved; CHECK(aibgr::parseBrushStrokes(host.brushData,saved)); CHECK_EQ(saved.size(),size_t(1));
-    pen.doubles[kOfxInteractPropPenPosition]={138,18}; // CLEAR
+    pen.doubles[kOfxInteractPropPenPosition]={258,18}; // CLEAR
     CHECK_EQ(brushOverlayMain(kOfxInteractActionPenDown,h,handle(pen),nullptr),kOfxStatOK);
     CHECK_EQ(brushOverlayMain(kOfxInteractActionPenUp,h,handle(pen),nullptr),kOfxStatOK);
     CHECK(aibgr::parseBrushStrokes(host.brushData,saved)); CHECK(saved.empty());
-    pen.doubles[kOfxInteractPropPenPosition]={258,18}; // OFF
+    pen.doubles[kOfxInteractPropPenPosition]={378,18}; // OFF
     CHECK_EQ(brushOverlayMain(kOfxInteractActionPenDown,h,handle(pen),nullptr),kOfxStatOK);
     CHECK_EQ(brushOverlayMain(kOfxInteractActionPenUp,h,handle(pen),nullptr),kOfxStatOK);
     CHECK_EQ(host.brushMode,0);

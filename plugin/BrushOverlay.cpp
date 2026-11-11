@@ -135,13 +135,13 @@ bool viewportToolbar(Toolbar& bar) {
     gl.getInt(0x0BA2u, viewport); // GL_VIEWPORT
     return toolbarViewportTransform(model,proj,viewport,bar.x,bar.y,bar.sx,bar.sy);
 }
-constexpr int kButtonWidth=120, kButtonHeight=36, kToolbarColumns=3;
+constexpr int kButtonWidth=120, kButtonHeight=36, kToolbarColumns=4, kToolbarButtons=8;
 int toolbarHit(const Toolbar& b, OfxPointD p) {
     const double x=(p.x-b.x)/b.sx, y=(p.y-b.y)/b.sy;
     if (!std::isfinite(x) || !std::isfinite(y) || x<0 || x>=kToolbarColumns*kButtonWidth || y<0 || y>=2*kButtonHeight) return -1;
     const int col=int(x/kButtonWidth), row=int(y/kButtonHeight);
     if (x-col*kButtonWidth>=kButtonWidth-2 || y-row*kButtonHeight>=kButtonHeight-2) return -1;
-    return row==1 ? col : col+3;
+    return row==1 ? col : col+kToolbarColumns;
 }
 // Tiny built-in bitmap alphabet avoids relying on a system font or host GL text support.
 const unsigned char* letter(char c) {
@@ -158,6 +158,7 @@ const unsigned char* letter(char c) {
     case 'M': {static const unsigned char p[7]={17,27,21,21,17,17,17};return p;}
     case 'N': {static const unsigned char p[7]={17,25,21,19,17,17,17};return p;}
     case 'O': {static const unsigned char p[7]={14,17,17,17,17,17,14};return p;}
+    case 'P': {static const unsigned char p[7]={30,17,17,30,16,16,16};return p;}
     case 'R': {static const unsigned char p[7]={30,17,17,30,20,18,17};return p;}
     case 'S': {static const unsigned char p[7]={15,16,16,14,1,1,30};return p;}
     case 'T': {static const unsigned char p[7]={31,4,4,4,4,4,4};return p;}
@@ -171,20 +172,29 @@ const unsigned char* letter(char c) {
 void drawToolbar(const Toolbar& b, int mode, int guided, bool detail) {
     static Gl gl;
     if (!gl.usable()) return;
-    const char* labels[]={"ADD BOX", "REMOVE BOX", detail ? "DETAIL ON" : "DETAIL OFF", "UNDO", "CLEAR", "OFF"};
+    // Order matches toolbarHit(): the top row is the prompt tools, the bottom row is everything
+    // else. Point prompts are drawn in the same green (keep) / red (remove) language as boxes.
+    const char* labels[]={"ADD BOX", "REMOVE BOX", "ADD POINT", "REMOVE POINT",
+                          detail ? "DETAIL ON" : "DETAIL OFF", "UNDO", "CLEAR", "OFF"};
     gl.push(0x00000001u | 0x00000004u | 0x00002000u);
     gl.disable(0x0B71u); gl.disable(0x0B50u); gl.disable(0x0B44u);
     gl.disable(0x0BC0u); gl.disable(0x0DE1u); gl.disable(0x0BE2u);
     gl.width(2.0f);
-    for(int i=0;i<6;++i) {
-        const double x=b.x+(i%3)*kButtonWidth*b.sx, y=b.y+(i<3 ? kButtonHeight : 0)*b.sy;
-        const bool selected=(i==0&&mode==4&&(guided==2||guided==3))||(i==1&&mode==5&&guided==2)||(i==2&&detail)||(i==5&&mode==0);
+    for(int i=0;i<kToolbarButtons;++i) {
+        const double x=b.x+(i%kToolbarColumns)*kButtonWidth*b.sx;
+        const double y=b.y+(i<kToolbarColumns ? kButtonHeight : 0)*b.sy;
+        const bool selected=(i==0&&mode==4&&(guided==2||guided==3))||(i==1&&mode==5&&guided==2)||
+                            (i==2&&mode==6&&guided==2)||(i==3&&mode==7&&guided==2)||
+                            (i==4&&detail)||(i==7&&mode==0);
         gl.colour(0.045f,0.055f,0.07f,1.0f);
         gl.begin(0x0007u); gl.vertex(x,y); gl.vertex(x+118*b.sx,y); gl.vertex(x+118*b.sx,y+34*b.sy); gl.vertex(x,y+34*b.sy); gl.end();
         if(selected) gl.colour(1.0f,0.8f,0.1f,1); else gl.colour(0.65f,0.7f,0.75f,1);
         gl.begin(0x0002u); gl.vertex(x,y); gl.vertex(x+118*b.sx,y); gl.vertex(x+118*b.sx,y+34*b.sy); gl.vertex(x,y+34*b.sy); gl.end();
-        if(i==0) gl.colour(0.35f,1.0f,0.45f,1); else if(i==1) gl.colour(1.0f,0.4f,0.4f,1); else gl.colour(1,1,1,1);
-        constexpr double scale=1.7; const double textWidth=(std::strlen(labels[i])*6-1)*scale;
+        if(i==0||i==2) gl.colour(0.35f,1.0f,0.45f,1);
+        else if(i==1||i==3) gl.colour(1.0f,0.4f,0.4f,1);
+        else gl.colour(1,1,1,1);
+        // 1.4 keeps the longest label ("REMOVE POINT") inside 118 units.
+        constexpr double scale=1.4; const double textWidth=(std::strlen(labels[i])*6-1)*scale;
         const double left=(118-textWidth)/2, bottom=(34-7*scale)/2;
         gl.begin(0x0007u);
         for(size_t k=0;labels[i][k];++k) {
@@ -208,12 +218,27 @@ void drawStrokes(const std::vector<BrushStroke>& strokes) {
         if (s.box && s.points.size()==2) {
             const auto a=s.points[0],b=s.points[1]; gl.begin(0x0002u);
             gl.vertex(a.x,a.y); gl.vertex(b.x,a.y); gl.vertex(b.x,b.y); gl.vertex(a.x,b.y); gl.end();
+        } else if (s.point && !s.points.empty()) {
+            // Point prompt: a ring plus a cross, sized by the brush radius, so it stays visible at
+            // any zoom and does not depend on the host font.
+            const auto p=s.points[0];
+            const double r=std::clamp(s.radius,1.0,200.0);
+            gl.begin(0x0002u); // GL_LINE_LOOP
+            for (int j=0;j<20;++j) {
+                const double angle = j * (6.283185307179586 / 20.0);
+                gl.vertex(p.x + r*std::cos(angle), p.y + r*std::sin(angle));
+            }
+            gl.end();
+            gl.begin(0x0001u); // GL_LINES
+            gl.vertex(p.x-r*1.6,p.y); gl.vertex(p.x+r*1.6,p.y);
+            gl.vertex(p.x,p.y-r*1.6); gl.vertex(p.x,p.y+r*1.6);
+            gl.end();
         } else {
             gl.begin(0x0003u); // GL_LINE_STRIP
             for (const auto& p : s.points) gl.vertex(p.x,p.y);
             gl.end();
         }
-        if (s.outline || s.box) continue;
+        if (s.outline || s.box || s.point) continue;
         for (const auto& p : s.points) {
             gl.begin(0x0002u); // GL_LINE_LOOP
             for (int j=0; j<20; ++j) {
@@ -315,13 +340,16 @@ OfxStatus brushOverlayMain(const char* action, const void* handle, OfxPropertySe
                     return p && paramSuite && paramSuite->paramSetValue && paramSuite->paramSetValue(p,value)==kOfxStatOK;
                 };
                 bool ok=true;
-                if(button==0 || button==1) {
-                    ok=setChoice(pname::kBrushMode,button==0 ? 4 : 5);
+                if(button>=0 && button<=3) {
+                    // Buttons 0-3 are the four prompt tools: add box, remove box, add point,
+                    // remove point. Every one of them also switches the selection method to AI.
+                    static constexpr int kPromptModes[]={4,5,6,7};
+                    ok=setChoice(pname::kBrushMode,kPromptModes[button]);
                     ok=setChoice(pname::kSelectionMode,2) && ok;
-                } else if(button==2) {
+                } else if(button==4) {
                     int detail=0; reader.getInt(pname::kBoxDetailRecovery,time,detail);
                     ok=setChoice(pname::kBoxDetailRecovery,detail ? 0 : 1);
-                } else if(button==3 || button==4) editSavedBrush(params,time,button==4);
+                } else if(button==5 || button==6) editSavedBrush(params,time,button==6);
                 else ok=setChoice(pname::kBrushMode,0);
                 if(!ok) AIBGR_LOGE("viewer toolbar: host rejected parameter change");
                 if (suite->interactRedraw) suite->interactRedraw(interact);
@@ -329,8 +357,8 @@ OfxStatus brushOverlayMain(const char* action, const void* handle, OfxPropertySe
             }
             reader.getInt(pname::kBrushMode, time, mode);
             reader.getDouble(pname::kBrushRadius, time, radius);
-            if ((mode != 1 && mode != 2 && mode != 3 && mode != 4 && mode != 5) || !std::isfinite(radius)) return kOfxStatReplyDefault;
-            if (mode==4 || mode==5) {
+            if ((mode != 1 && mode != 2 && mode != 3 && mode != 4 && mode != 5 && mode != 6 && mode != 7) || !std::isfinite(radius)) return kOfxStatReplyDefault;
+            if (mode>=4) {
                 int selected=0; reader.getInt(pname::kSelectionMode,time,selected);
                 if(selected!=2) {
                     auto param=reader.handle(pname::kSelectionMode);
@@ -341,10 +369,19 @@ OfxStatus brushOverlayMain(const char* action, const void* handle, OfxPropertySe
             }
             {
                 std::lock_guard<std::mutex> lock(state->mutex);
-                state->current = BrushStroke{}; state->overflow = false; state->current.keep = (mode == 1 || mode == 4); state->current.outline = (mode == 3); state->current.box = (mode == 4 || mode == 5); state->current.radius = std::clamp(radius,1.0,200.0);
-                state->current.points.push_back({pos.x,pos.y}); if (state->current.box) state->current.points.push_back({pos.x,pos.y}); state->dragging = true;
+                state->current = BrushStroke{}; state->overflow = false;
+                state->current.keep = (mode == 1 || mode == 4 || mode == 6);
+                state->current.outline = (mode == 3);
+                state->current.box = (mode == 4 || mode == 5);
+                state->current.point = (mode == 6 || mode == 7);
+                state->current.radius = std::clamp(radius,1.0,200.0);
+                // A box starts as a zero-area rectangle between two corners; a point prompt starts
+                // as one point and follows the pen until release, so click-and-settle works.
+                state->current.points.push_back({pos.x,pos.y});
+                if (state->current.box) state->current.points.push_back({pos.x,pos.y});
+                state->dragging = true;
             }
-            AIBGR_LOGI("viewer brush: started %s stroke", mode == 1 ? "keep" : mode == 2 ? "remove" : mode == 3 ? "outline" : mode == 4 ? "add box" : "remove box");
+            AIBGR_LOGI("viewer brush: started %s stroke", mode == 1 ? "keep" : mode == 2 ? "remove" : mode == 3 ? "outline" : mode == 4 ? "add box" : mode == 5 ? "remove box" : mode == 6 ? "add point" : "remove point");
             if (suite->interactRedraw) suite->interactRedraw(interact);
             return kOfxStatOK;
         }
@@ -358,9 +395,12 @@ OfxStatus brushOverlayMain(const char* action, const void* handle, OfxPropertySe
                 if (state->buttonDown) { if (isUp) state->buttonDown=false; return kOfxStatOK; }
                 if (!state->dragging) return kOfxStatReplyDefault;
                 const auto& last = state->current.points.back();
-                if (state->current.box && havePosition && std::isfinite(pos.x) && std::isfinite(pos.y) && std::abs(pos.x)<=1000000 && std::abs(pos.y)<=1000000) {
+                const bool validPosition = havePosition && std::isfinite(pos.x) && std::isfinite(pos.y) && std::abs(pos.x)<=1000000 && std::abs(pos.y)<=1000000;
+                if (state->current.box && validPosition) {
                     state->current.points[1]={pos.x,pos.y};
-                } else if (!state->current.box && havePosition && std::isfinite(pos.x) && std::isfinite(pos.y) && std::abs(pos.x)<=1000000 && std::abs(pos.y)<=1000000 &&
+                } else if (state->current.point && validPosition) {
+                    state->current.points[0]={pos.x,pos.y};
+                } else if (!state->current.box && !state->current.point && havePosition && std::isfinite(pos.x) && std::isfinite(pos.y) && std::abs(pos.x)<=1000000 && std::abs(pos.y)<=1000000 &&
                     std::hypot(pos.x-last.x,pos.y-last.y) > (state->current.outline ? 10.0 : state->current.radius*0.2)) {
                     if (state->current.points.size() < kMaxPointsPerStroke) state->current.points.push_back({pos.x,pos.y});
                     else state->overflow=true;
@@ -382,11 +422,13 @@ OfxStatus brushOverlayMain(const char* action, const void* handle, OfxPropertySe
                     if (overflow) {
                         warn("Stroke discarded: too many sampled points. Draw a shorter stroke, or use Undo/Clear.");
                     } else if (finished.box && (std::abs(finished.points[0].x-finished.points[1].x)<1 || std::abs(finished.points[0].y-finished.points[1].y)<1)) {
-                        warn("Draw a box around the object rather than clicking a single point.");
+                        warn("Draw a box around the object, or use ADD POINT to click it.");
                     } else if (finished.outline && finished.points.size() < 3) {
                         warn("Outline needs at least three points; draw a longer outline.");
-                    } else if (finished.box && std::count_if(strokes.begin(),strokes.end(),[](const BrushStroke& s){return s.box;}) >= 32) {
-                        warn("AI box limit reached (32). Use Undo or Clear to remove boxes.");
+                    } else if (finished.point && finished.points.size() != 1) {
+                        warn("Point prompt was discarded; click once on the subject.");
+                    } else if (isAiPrompt(finished) && std::count_if(strokes.begin(),strokes.end(),[](const BrushStroke& s){return isAiPrompt(s);}) >= 32) {
+                        warn("AI prompt limit reached (32). Use Undo or Clear to remove prompts.");
                     } else if (count <= kMaxBrushPoints) {
                         strokes.push_back(std::move(finished));
                         if (!writeStrokes(params, strokes)) warn("Resolve could not save this stroke. The stroke was not applied.");

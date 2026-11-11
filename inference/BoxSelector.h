@@ -9,7 +9,7 @@ public:
     BoxSelector(); ~BoxSelector();
     Result open(const std::string& runtime, const std::string& encoder, const std::string& decoder);
     void configure(std::vector<BrushStroke> strokes, FrameContext ctx, bool recoverDetail = false);
-    Result refine(const FloatImage& image, Matte& matte, bool inverted) override;
+    Result refine(const FloatImage& image, Matte& matte) override;
     void clearCache() noexcept;
 private:
     struct Impl;

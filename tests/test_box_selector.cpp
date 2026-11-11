@@ -6,7 +6,7 @@
 using namespace aibgr;
 TEST(boxSelection, rejectsMissingModels) {
     BoxSelector selector; CHECK(!selector.open("missing","missing","missing").ok());
-    FloatImage im(2,2); Matte m(2,2); CHECK(!selector.refine(im,m,false).ok());
+    FloatImage im(2,2); Matte m(2,2); CHECK(!selector.refine(im,m).ok());
 }
 TEST(boxSelection, realTreeImageWhenProvided) {
     const char* runtime=std::getenv("AIBGR_TEST_ORT");
@@ -20,11 +20,11 @@ TEST(boxSelection, realTreeImageWhenProvided) {
     FrameContext ctx; ctx.renderWindow={0,0,1024,574};
     BrushStroke box{true,1,{{100,4},{825,573}},false,true};
     selector.configure({box},ctx); Matte result(1024,574); result.fill(0.5f);
-    auto r=selector.refine(image,result,false); CHECK_MSG(r.ok(),r.toString()); if(!r.ok())return;
+    auto r=selector.refine(image,result); CHECK_MSG(r.ok(),r.toString()); if(!r.ok())return;
     CHECK(result.at(500,250)>0.9f); CHECK(result.at(40,400)<0.1f); CHECK(result.at(300,125)>0.9f);
     // Alternate hypothesis recovers part of the missing left foliage on this supplied image.
     selector.configure({box},ctx,true); Matte detail(1024,574); detail.fill(0.5f);
-    CHECK(selector.refine(image,detail,false).ok());
+    CHECK(selector.refine(image,detail).ok());
     size_t gained=0, foliage=0, lost=0;
     for(int y=0;y<574;++y) for(int x=0;x<1024;++x) {
         if(detail.at(x,y)>result.at(x,y)+0.1f) { ++gained; if(x>=120&&x<330&&y>=280&&y<450) ++foliage; }
@@ -32,22 +32,69 @@ TEST(boxSelection, realTreeImageWhenProvided) {
     }
     CHECK(gained>100); CHECK(foliage>100); CHECK_EQ(lost,size_t(0)); CHECK(detail.at(40,400)<0.1f);
     selector.configure({box},ctx); Matte normalAgain(1024,574);
-    CHECK(selector.refine(image,normalAgain,false).ok()); CHECK_NEAR(normalAgain.at(500,250),result.at(500,250),1e-5);
+    CHECK(selector.refine(image,normalAgain).ok()); CHECK_NEAR(normalAgain.at(500,250),result.at(500,250),1e-5);
     BrushStroke removeLeft{false,1,{{249,14},{366,164}},false,true};
     selector.configure({box,removeLeft},ctx); Matte removed(1024,574); removed.fill(0.5f);
-    CHECK(selector.refine(image,removed,false).ok());
+    CHECK(selector.refine(image,removed).ok());
     CHECK(removed.at(300,125)<0.1f); CHECK(removed.at(500,250)>0.9f);
     BrushStroke addLeft=removeLeft; addLeft.keep=true;
     selector.configure({box,removeLeft,addLeft},ctx); Matte restored(1024,574); restored.fill(0.5f);
-    CHECK(selector.refine(image,restored,false).ok()); CHECK(restored.at(300,125)>0.9f);
+    CHECK(selector.refine(image,restored).ok()); CHECK(restored.at(300,125)>0.9f);
+    // Inversion is the compositor's job. A refiner must always report SUBJECT alpha, so asking
+    // for the same prompt twice gives byte-identical output (test_pipeline checks the inversion).
     selector.configure({box},ctx);
-    Matte inverted(1024,574); inverted.fill(0.5f); CHECK(selector.refine(image,inverted,true).ok());
-    CHECK_NEAR(result.at(500,250)+inverted.at(500,250),1.0,1e-5);
-    CHECK_NEAR(result.at(40,400)+inverted.at(40,400),1.0,1e-5);
+    Matte againSame(1024,574); againSame.fill(0.5f);
+    CHECK(selector.refine(image,againSame).ok());
+    CHECK_NEAR(againSame.at(500,250),result.at(500,250),1e-5);
     // Same canonical box at proxy scale / nonzero window produces the same mask.
     FrameContext proxy; proxy.renderScaleX=proxy.renderScaleY=0.5; proxy.renderWindow={10,20,1034,594};
     BrushStroke transformed{true,1,{{220,48},{1670,1186}},false,true};
     selector.configure({transformed},proxy); Matte again(1024,574); again.fill(0.5f);
-    CHECK(selector.refine(image,again,false).ok()); CHECK_NEAR(again.at(500,250),result.at(500,250),1e-5);
-    selector.clearCache(); CHECK(selector.refine(image,again,false).ok()); CHECK_NEAR(again.at(40,400),result.at(40,400),1e-5);
+    CHECK(selector.refine(image,again).ok()); CHECK_NEAR(again.at(500,250),result.at(500,250),1e-5);
+    selector.clearCache(); CHECK(selector.refine(image,again).ok()); CHECK_NEAR(again.at(40,400),result.at(40,400),1e-5);
+}
+
+TEST(boxSelection, pointPromptIsRejectedCleanlyWithoutModels) {
+    BoxSelector selector; // never opened: this is the "model files missing" path
+    FrameContext ctx; ctx.renderWindow={0,0,64,64};
+    selector.configure({{true,1,{{32,32}},false,false,true}}, ctx);
+    FloatImage image(64,64); Matte matte(64,64);
+    const Result r = selector.refine(image,matte);
+    CHECK(!r.ok()); CHECK_EQ(r.status, Status::InvalidState);
+}
+
+TEST(boxSelection, realModelPointPromptWhenProvided) {
+    const char* runtime=std::getenv("AIBGR_TEST_ORT");
+    const char* enc=std::getenv("AIBGR_TEST_BOX_ENCODER"), *dec=std::getenv("AIBGR_TEST_BOX_DECODER");
+    if(!runtime||!enc||!dec) return;
+    const int W=640,H=360;
+    FloatImage image(W,H);
+    for(int y=0;y<H;++y) for(int x=0;x<W;++x) {
+        float* p=image.pixel(x,y);
+        p[0]=0.05f; p[1]=0.07f; p[2]=0.35f; p[3]=1.0f;   // dark blue background
+    }
+    // Bright block in the TOP-LEFT of the picture: top-down rows 30..150, columns 120..280.
+    // FloatImage and Matte rows run bottom-up, so the same rows are H-1-ytd.
+    for(int ytd=30;ytd<150;++ytd) {
+        const int y=H-1-ytd;
+        for(int x=120;x<280;++x) { float* p=image.pixel(x,y); p[0]=0.95f; p[1]=0.55f; p[2]=0.10f; p[3]=1.0f; }
+    }
+    BoxSelector selector;
+    auto loaded=selector.open(runtime,enc,dec); CHECK_MSG(loaded.ok(),loaded.toString());
+    if(!loaded.ok()) return;
+    FrameContext ctx; ctx.renderWindow={0,0,W,H};
+    // Canonical coordinates are y-up: picture centre (200, ytd 90) becomes y = H-90 = 270.
+    BrushStroke point{true,1,{{200,270}},false,false,true};
+    selector.configure({point},ctx);
+    Matte result(W,H); result.fill(0.5f);
+    auto r=selector.refine(image,result); CHECK_MSG(r.ok(),r.toString()); if(!r.ok()) return;
+    CHECK(result.at(200,H-1-90)>0.5f);   // the clicked subject
+    CHECK(result.at(200,90)<0.1f);       // the mirrored row: a y flip would light this up
+    CHECK(result.at(560,60)<0.1f);       // background
+    // A remove point subtracts the object found under it, exactly like a remove box.
+    BrushStroke remove{false,1,{{200,270}},false,false,true};
+    selector.configure({point,remove},ctx);
+    Matte removed(W,H); removed.fill(0.5f);
+    CHECK(selector.refine(image,removed).ok());
+    CHECK(removed.at(200,H-1-90)<0.1f);
 }

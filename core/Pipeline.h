@@ -40,10 +40,15 @@ public:
 };
 
 /// Optional interactive selection algorithm that can use the image and the current matte.
+///
+/// Contract: a refiner writes SUBJECT alpha. "Invert Matte" is applied exactly once, by
+/// Compositor, because a refiner that inverted its own output produced a matte the compositor then
+/// inverted again - i.e. the control did nothing. Keeping the inversion in one place also keeps
+/// this interface honest: there is no second interpretation of "inverted" to get wrong.
 class MatteRefiner {
 public:
     virtual ~MatteRefiner() = default;
-    virtual Result refine(const FloatImage& image, Matte& matte, bool inverted) = 0;
+    virtual Result refine(const FloatImage& image, Matte& matte) = 0;
 };
 
 /// The built-in border-colour key, wrapped as a MatteSource.

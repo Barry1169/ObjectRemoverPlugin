@@ -7,7 +7,7 @@ namespace aibgr {
 class GuidedSelection final : public MatteRefiner {
 public:
     void configure(std::vector<BrushStroke> strokes, FrameContext ctx) { strokes_ = std::move(strokes); ctx_ = ctx; }
-    Result refine(const FloatImage& image, Matte& matte, bool inverted) override;
+    Result refine(const FloatImage& image, Matte& matte) override;
     void releaseBuffers() noexcept;
 private:
     std::vector<BrushStroke> strokes_;

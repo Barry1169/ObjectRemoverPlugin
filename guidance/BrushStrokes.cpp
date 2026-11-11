@@ -11,38 +11,89 @@ bool parseBrushStrokes(const std::string& text, std::vector<BrushStroke>& out) {
     out.clear();
     if (text.empty()) return true;
     if (text.size() > 400000) return false;
-    std::istringstream in(text); in.imbue(std::locale::classic());
-    std::string version; size_t count = 0;
-    if (!(in >> version >> count) || (version != "AIBGR1" && version != "AIBGR2" && version != "AIBGR3" && version != "AIBGR4") || count > kMaxBrushPoints) return false;
+    std::istringstream in(text);
+    in.imbue(std::locale::classic());
+    std::string version;
+    size_t count = 0;
+    if (!(in >> version >> count) ||
+        (version != "AIBGR1" && version != "AIBGR2" && version != "AIBGR3" &&
+         version != "AIBGR4" && version != "AIBGR5") ||
+        count > kMaxBrushPoints) {
+        return false;
+    }
+    // AIBGR5 adds single-point AI prompts ('P' keep, 'N' remove). Older builds reject the whole
+    // string rather than silently dropping the unsupported prompts, which is the safe failure.
+    const bool pointsAllowed = version == "AIBGR5";
     size_t total = 0;
     for (size_t i = 0; i < count; ++i) {
-        char kind = 0; double radius = 0; size_t n = 0;
-        if (!(in >> kind >> radius >> n) || (kind != 'K' && kind != 'R' && !(kind == 'L' && version != "AIBGR1") && !(version == "AIBGR4" && (kind == 'A' || kind == 'D'))) || !std::isfinite(radius) ||
-            radius <= 0 || radius > 200 || n == 0 || ((kind == 'A' || kind == 'D') && n != 2) || n > kMaxPointsPerStroke || n > kMaxBrushPoints - total) { out.clear(); return false; }
-        BrushStroke stroke; stroke.keep = kind == 'K' || kind == 'A'; stroke.outline = kind == 'L'; stroke.box = kind == 'A' || kind == 'D'; stroke.radius = radius;
+        char kind = 0;
+        double radius = 0;
+        size_t n = 0;
+        if (!(in >> kind >> radius >> n)) { out.clear(); return false; }
+        const bool boxKind = kind == 'A' || kind == 'D';
+        const bool pointKind = kind == 'P' || kind == 'N';
+        const bool lineKind = kind == 'L' && version != "AIBGR1";
+        const bool brushKind = kind == 'K' || kind == 'R';
+        if (!(boxKind || brushKind || lineKind || (pointKind && pointsAllowed)) ||
+            !std::isfinite(radius) || radius <= 0 || radius > 200 || n == 0 ||
+            (boxKind && n != 2) || (pointKind && n != 1) || n > kMaxPointsPerStroke ||
+            n > kMaxBrushPoints - total) {
+            out.clear();
+            return false;
+        }
+        BrushStroke stroke;
+        stroke.keep = kind == 'K' || kind == 'A' || kind == 'P';
+        stroke.outline = lineKind;
+        stroke.box = boxKind;
+        stroke.point = pointKind;
+        stroke.radius = radius;
         for (size_t j = 0; j < n; ++j) {
             BrushPoint p;
             if (!(in >> p.x >> p.y) || !std::isfinite(p.x) || !std::isfinite(p.y) ||
-                std::abs(p.x) > 1000000 || std::abs(p.y) > 1000000) { out.clear(); return false; }
+                std::abs(p.x) > 1000000 || std::abs(p.y) > 1000000) {
+                out.clear();
+                return false;
+            }
             stroke.points.push_back(p);
         }
-        total += n; out.push_back(std::move(stroke));
+        total += n;
+        out.push_back(std::move(stroke));
     }
     in >> std::ws;
     if (!in.eof()) { out.clear(); return false; }
     return true;
 }
+
 std::string serialiseBrushStrokes(const std::vector<BrushStroke>& strokes) {
-    std::ostringstream out; out.imbue(std::locale::classic());
-    const bool outlines = std::any_of(strokes.begin(), strokes.end(), [](const BrushStroke& s) { return s.outline; });
-    size_t total=0; bool boxes=false; for (const auto& s : strokes) { total+=s.points.size(); boxes = boxes || s.box; }
-    out << (boxes ? "AIBGR4 " : total>kLegacyBrushPoints ? "AIBGR3 " : outlines ? "AIBGR2 " : "AIBGR1 ") << strokes.size() << ' ' << std::fixed << std::setprecision(3);
+    std::ostringstream out;
+    out.imbue(std::locale::classic());
+    const bool outlines =
+        std::any_of(strokes.begin(), strokes.end(), [](const BrushStroke& s) { return s.outline; });
+    size_t total = 0;
+    bool boxes = false, points = false;
     for (const auto& s : strokes) {
-        out << (s.box ? (s.keep ? 'A' : 'D') : s.outline ? 'L' : s.keep ? 'K' : 'R') << ' ' << s.radius << ' ' << s.points.size() << ' ';
+        total += s.points.size();
+        boxes = boxes || s.box;
+        points = points || s.point;
+    }
+    // Stay on the most widely readable version that can express the data: point prompts are the
+    // only thing that needs AIBGR5, and boxes alone stay AIBGR4.
+    const char* version = points ? "AIBGR5"
+                                 : boxes ? "AIBGR4"
+                                         : total > kLegacyBrushPoints ? "AIBGR3"
+                                                                      : outlines ? "AIBGR2"
+                                                                                 : "AIBGR1";
+    out << version << ' ' << strokes.size() << ' ' << std::fixed << std::setprecision(3);
+    for (const auto& s : strokes) {
+        const char kind = s.box ? (s.keep ? 'A' : 'D')
+                                : s.point ? (s.keep ? 'P' : 'N')
+                                          : s.outline ? 'L' : s.keep ? 'K' : 'R';
+        out << kind << ' ' << s.radius << ' ' << s.points.size() << ' ';
         for (const auto& p : s.points) out << p.x << ' ' << p.y << ' ';
     }
     return out.str();
 }
+
 void simplifyBrushStroke(BrushStroke& stroke, double tolerance) {
     auto& points=stroke.points;
     if (points.size()<3 || !std::isfinite(tolerance) || tolerance<=0) return;
@@ -73,7 +124,7 @@ Result BrushCorrections::apply(Matte& matte, bool inverted) const {
     // Draw each stroke in order, as soft capsules. Coordinates are evaluated in canonical
     // space, so a round brush remains correct for proxy scales and non-square pixels.
     for (const auto& s : strokes_) {
-        if (s.box || s.outline || s.points.empty()) continue;
+        if (isAiPrompt(s) || s.outline || s.points.empty()) continue;
         for (size_t i = 0; i < s.points.size(); ++i) {
             const auto a = s.points[i == 0 ? 0 : i - 1], b = s.points[i];
             auto low = [](double v, int size) {

@@ -134,7 +134,15 @@ Result Pipeline::process(const FrameContext& ctx, const PipelineSettings& settin
     // --- 2. Matte resolution ----------------------------------------------
     int mw = 0;
     int mh = 0;
-    computeMatteSize(effective, w, h, mw, mh);
+    if (selectionOnly_) {
+        // An interactive selector produces the matte itself, at frame resolution, from its own
+        // (much smaller) model input. Nothing consumes a downscaled base matte here, so asking for
+        // one used to cost two full-frame resizes per render - including on every cached frame.
+        mw = w;
+        mh = h;
+    } else {
+        computeMatteSize(effective, w, h, mw, mh);
+    }
     stats.matteWidth = mw;
     stats.matteHeight = mh;
 
@@ -213,7 +221,7 @@ Result Pipeline::process(const FrameContext& ctx, const PipelineSettings& settin
     }
 
     if (selectionRefiner_) {
-        const Result selected = selectionRefiner_->refine(*encoded, *finalMatte, effective.matteInvert);
+        const Result selected = selectionRefiner_->refine(*encoded, *finalMatte);
         if (!selected.ok()) {
             AIBGR_LOGE("guided selection: %s", selected.toString().c_str());
             if (selectionOnly_) {

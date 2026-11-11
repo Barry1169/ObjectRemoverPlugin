@@ -17,16 +17,18 @@ objects through a video.
 
 ## What it can do
 
-- **AI box selection:** draw up to 32 ordered add/remove box prompts in the
-  Resolve viewer. EfficientSAM guesses a mask for each prompt. Boxes are prompts,
-  not precise clipping boundaries.
+- **AI prompt selection:** draw up to 32 ordered add/remove prompts in the
+  Resolve viewer — loose rectangles around a subject, or single clicks on it.
+  EfficientSAM guesses a mask for each prompt. Prompts are hints, not precise
+  clipping boundaries.
 - **Detail recovery:** an optional alternate-mask mode can recover some missed
   foliage or branches, but can also include unwanted sky or objects.
-- **Viewer controls:** add, remove, undo, clear, stop drawing, and toggle detail
-  recovery. The image is unchanged until an add box is drawn.
+- **Viewer controls:** add box, remove box, add point, remove point, undo,
+  clear, stop drawing, and toggle detail recovery. The image is unchanged until
+  an add prompt is drawn.
 - **Other experimental modes:** manual brush corrections, guided selection,
   optional PNG guidance, a legacy automatic U2NetP matte, and a simple
-  border-colour key. These are separate from the AI box workflow.
+  border-colour key. These are separate from the AI prompt workflow.
 
 **Limitations:** Fine branches, hair, fences and similar details may be missed;
 background can remain; a box may select the wrong subject. Results vary with the
@@ -81,7 +83,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\setup-selection.ps1
 ```
 
 The first script installs a CPU ONNX Runtime (1.23.2) **and also downloads the
-legacy U2NetP model**, even though U2NetP is not needed for AI box selection.
+legacy U2NetP model**, even though U2NetP is not needed for AI prompt selection.
 The second downloads the official EfficientSAM-Ti encoder and decoder (about
 41 MB total). The scripts verify downloaded hashes and do not overwrite existing
 files; an existing runtime is left unchanged and is not verified. Check the
@@ -138,45 +140,49 @@ It replaces an existing bundle of the same name, so back it up first. It also
 attempts to refresh Resolve's OFX plugin cache. Start Resolve only after the
 script succeeds.
 
-## Use the AI box selector
+## Use the AI prompt selector
 
 1. In a new test project, place a clip or image on the Edit page. Add **AI
    Background Remover** from **Effects → OpenFX → AI Matting** to the clip.
 2. Select the clip/effect and enable **Open FX Overlay** in the viewer. A new
    effect starts in **Ready**, with the source unchanged.
-3. Click **ADD BOX** and drag a loose rectangle around the subject. Releasing
-   the first add box activates AI box selection. Allow time for CPU inference.
-4. Draw more **ADD BOX** prompts to union selections, or **REMOVE BOX** prompts
-   to subtract them. The order matters. **UNDO** removes the last action;
-   **CLEAR** removes all saved actions; **OFF** stops drawing but doesn't turn
-   off the effect. Boxes disappear on release.
+3. Click **ADD BOX** and drag a loose rectangle around the subject, or click
+   **ADD POINT** and click once on it. Releasing the first add prompt activates
+   AI prompt selection. Allow time for CPU inference.
+4. Draw more prompts to refine the selection: **ADD BOX** / **ADD POINT** unite
+   their prediction with the current one, and **REMOVE BOX** / **REMOVE POINT**
+   subtract the object found there. The order matters. Boxes and points share a
+   limit of 32 prompts. **UNDO** removes the last action; **CLEAR** removes all
+   saved actions; **OFF** stops drawing but doesn't turn off the effect. Prompts
+   disappear on release.
 5. Try **DETAIL ON** if details are missing, and turn it off if it makes the
    mask worse. Inspect **Matte Only** or **Foreground Only** in the Inspector
    and check the final output.
 
 If the toolbar is not visible, ensure the effect is selected and Open FX Overlay
 is enabled, then try zooming out or fitting the image. Inspector controls are
-also available. Clearing all boxes returns box mode to the unchanged image.
-See [the AI box guide](docs/08-ai-box-selection.md) for further detail.
+also available. Clearing all prompts returns the effect to the unchanged image.
+See [the AI prompt guide](docs/08-ai-box-selection.md) for further detail.
 
 ## Troubleshooting and updates
 
 - **Plugin missing:** make sure the build/install succeeded, Resolve was closed,
   and the bundle is in the OFX Plugins folder. Restart Resolve. See the
   [Windows guide](docs/05-build-install-test-windows.md).
-- **Image remains unchanged after a box:** confirm the effect is enabled and the
+- **Image remains unchanged after a prompt:** confirm the effect is enabled and the
   runtime and both model files exist at the workspace paths above. Box mode
   passes the source through if loading or inference fails rather than silently
   applying the legacy colour key. Read `log.txt` in the checkout; after
   installing missing files use **Retry AI Load** or restart Resolve. Fallback
   log locations include `%ProgramData%\AiBgRemover\log.txt` and
   `%LOCALAPPDATA%\AiBgRemover\log.txt`.
-- **Output is inaccurate:** try a different loose box, add/remove prompts, or
+- **Output is inaccurate:** try a different loose box or point, add/remove prompts, or
   toggle detail recovery. None of these guarantees a correct matte.
 - **Update an existing checkout:** back up projects and the installed bundle,
   close Resolve, pull the intended branch using `git pull --ff-only`, then
-  rebuild and reinstall. Test old projects: the `AIBGR4` box format is not
-  readable by older plugin builds, and defaults in old projects may differ.
+  rebuild and reinstall. Test old projects: the `AIBGR4` box format and the
+  `AIBGR5` format written when point prompts are used are not readable by older
+  plugin builds, and defaults in old projects may differ.
 - **Remove the plugin:** close Resolve and use `tools\build-install.bat uninstall`
   from an Administrator command prompt. This removes the installed bundle; it
   does not delete your checkout, model files, or runtime.
@@ -206,7 +212,7 @@ advice. This README is not legal advice or a grant of rights.
 
 ## More documentation
 
-- [AI box selection and limitations](docs/08-ai-box-selection.md)
+- [AI prompt selection (boxes and points) and limitations](docs/08-ai-box-selection.md)
 - [Experimental viewer brush](docs/07-viewer-brush.md)
 - [Windows build, installation and diagnostics](docs/05-build-install-test-windows.md)
 - [Documentation index](docs/README.md)

@@ -577,6 +577,75 @@ TEST(pipeline, resolveMatteLongEdgeIsPredictable) {
     CHECK_EQ(Pipeline::resolveMatteLongEdge(s, 1920, 1080), 1920);
 }
 
+TEST(pipeline, invertMatteIsAppliedExactlyOnceForRefinedSelection) {
+    // Regression: BoxSelector and GuidedSelection used to invert their own output while the
+    // compositor inverted again, so "Invert Matte" silently did nothing in the AI prompt modes.
+    // A refiner now always reports subject alpha and the compositor owns the inversion.
+    class Refiner final : public MatteRefiner {
+    public:
+        Result refine(const FloatImage&, Matte& matte) override {
+            matte.fill(1.0f);
+            return Result::success();
+        }
+    } refiner;
+    auto src = makeFrame(48, 36);
+    auto ctx = makeContext(48, 36);
+    FloatImage dst;
+    Pipeline pipe;
+    pipe.setSelectionRefiner(&refiner);
+    pipe.setSelectionOnly(true);
+    PipelineSettings settings;
+    settings.inputColorSpace = ColorSpaceAssumption::DisplayReferred;
+    settings.outputMode = OutputMode::ForegroundOnly;
+    PipelineStats stats;
+
+    CHECK(pipe.process(ctx, settings, src, dst, stats).ok());
+    CHECK_NEAR(dst.pixel(20, 20)[3], 1.0, 1e-6);
+
+    settings.matteInvert = true;
+    CHECK(pipe.process(ctx, settings, src, dst, stats).ok());
+    CHECK_NEAR(dst.pixel(20, 20)[3], 0.0, 1e-6);
+
+    settings.outputMode = OutputMode::Composite;
+    CHECK(pipe.process(ctx, settings, src, dst, stats).ok());
+    CHECK_NEAR(dst.pixel(20, 20)[3], 0.0, 1e-6); // inverted: the subject is what gets removed
+    settings.matteInvert = false;
+    CHECK(pipe.process(ctx, settings, src, dst, stats).ok());
+    CHECK_NEAR(dst.pixel(20, 20)[3], 1.0, 1e-6); // normal: the subject is kept
+}
+
+TEST(pipeline, refinerReceivesAFullResolutionMatteAndSkipsTheBaseResize) {
+    // In prompt mode nothing consumes a downscaled base matte, so the pipeline must not spend two
+    // full-frame resizes producing and then upscaling one. The refiner is handed a frame-sized
+    // matte and overwrites it.
+    class SizeRefiner final : public MatteRefiner {
+    public:
+        int width = 0, height = 0;
+        Result refine(const FloatImage&, Matte& matte) override {
+            width = matte.width();
+            height = matte.height();
+            matte.fill(0.5f);
+            return Result::success();
+        }
+    } refiner;
+    auto src = makeFrame(48, 36);
+    auto ctx = makeContext(48, 36);
+    FloatImage dst;
+    Pipeline pipe;
+    pipe.setSelectionRefiner(&refiner);
+    pipe.setSelectionOnly(true);
+    PipelineSettings settings;
+    settings.inputColorSpace = ColorSpaceAssumption::DisplayReferred;
+    settings.quality = QualityPreset::Draft256;
+    PipelineStats stats;
+    CHECK(pipe.process(ctx, settings, src, dst, stats).ok());
+    CHECK_EQ(refiner.width, 48);
+    CHECK_EQ(refiner.height, 36);
+    CHECK_EQ(stats.matteWidth, 48);
+    CHECK(!stats.matteUpscaled);
+    CHECK_NEAR(dst.pixel(20, 20)[3], 0.5, 1e-6);
+}
+
 TEST(pipeline, matteSourceIsNonOwningAndNullable) {
     Pipeline pipeline;
     CHECK(pipeline.matteSource() == nullptr); // built-in fallback key is used
@@ -593,7 +662,7 @@ TEST(pipeline, boxOnlyNeverRunsBaseAndFailurePassesSourceThrough) {
     class Refiner final : public MatteRefiner {
     public:
         bool fail = false;
-        Result refine(const FloatImage&, Matte& matte, bool) override {
+        Result refine(const FloatImage&, Matte& matte) override {
             matte.fill(0.75f);
             return fail ? Result::fail(Status::BackendError, "simulated selector failure") : Result::success();
         }

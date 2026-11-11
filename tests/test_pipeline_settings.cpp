@@ -5,6 +5,7 @@
 // malformed animated keyframe.
 
 #include "TestCase.h"
+#include "util/Hash.h"
 
 #include <cmath>
 #include <cstring>
@@ -195,4 +196,36 @@ TEST(settings, enumNamesAreDistinctAndNonNull) {
     CHECK(gpuBackendName(GpuBackend::Cuda) != nullptr);
     CHECK(modelIdName(ModelId::BirefNetLite) != nullptr);
     CHECK(premultiplicationName(Premultiplication::Straight) != nullptr);
+}
+
+TEST(hash, fastContentHashIsStableSensitiveAndLengthAware) {
+    // The AI prompt selector keys its cached matte on this hash. A collision means a stale matte,
+    // and the tail handling deliberately reads in 8-byte words, so every short length is exercised
+    // here (the sanitizer build catches an over-read).
+    std::vector<unsigned char> buffer(80);
+    for (size_t i = 0; i < buffer.size(); ++i) buffer[i] = static_cast<unsigned char>(i * 37 + 11);
+
+    for (size_t n = 0; n <= 40; ++n) {
+        const uint64_t first = fastHashBytes(0x1234ULL, buffer.data(), n);
+        const uint64_t again = fastHashBytes(0x1234ULL, buffer.data(), n);
+        CHECK_EQ(first, again);
+        // Length is part of the key, even when the extra bytes are zeros.
+        std::vector<unsigned char> padded(n + 1, 0);
+        std::memcpy(padded.data(), buffer.data(), n);
+        CHECK(fastHashBytes(0x1234ULL, padded.data(), n + 1) != first);
+    }
+
+    // One changed bit anywhere in a large buffer changes the result.
+    std::vector<float> frame(4096, 0.5f);
+    const uint64_t base = fastHashBytes(7, frame.data(), frame.size() * sizeof(float));
+    for (size_t index : {size_t(0), size_t(1), size_t(511), frame.size() - 1}) {
+        std::vector<float> changed = frame;
+        changed[index] += 0.0009765625f;
+        CHECK(fastHashBytes(7, changed.data(), changed.size() * sizeof(float)) != base);
+    }
+
+    // Streaming through a seed is deterministic and order-dependent.
+    const uint64_t chained = fastHashBytes(fastHashBytes(3, "ab", 2), "cd", 2);
+    CHECK_EQ(chained, fastHashBytes(fastHashBytes(3, "ab", 2), "cd", 2));
+    CHECK(fastHashBytes(fastHashBytes(3, "cd", 2), "ab", 2) != chained);
 }

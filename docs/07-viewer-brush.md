@@ -12,7 +12,7 @@ It needs testing on the actual image; do not assume it will recover the whole tr
    project. To use this *legacy guided* method, choose **Automatic + guided selection** under
    Viewer Selection Method and select a model under **Automatic Model (legacy)**. The new default
    Ready mode does not apply an automatic matte.
-2. Select the effect and enable **Open FX Overlay**. The labelled toolbar now focuses on AI boxes;
+2. Select the effect and enable **Open FX Overlay**. The labelled toolbar now focuses on AI prompts (boxes and points);
    choose **Outline (guided)**, **Keep**, or **Remove** in the Inspector's Viewer Brush menu for
    the legacy guided tool. The Inspector also has the radius, Undo and Clear controls.
 3. Under **Guided Brush Behaviour**, choose **Samples only** to guide the selection without solid

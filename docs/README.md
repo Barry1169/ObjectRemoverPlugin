@@ -5,10 +5,11 @@ are installed. It has been tested using real inference on Linux, including a fak
 feature has not yet been tested in Windows/Resolve; previously reported playback crashes remain
 unproven fixed. The original colour-key fallback remains available.
 
-## Experimental in-Resolve AI box selection
+## Experimental in-Resolve AI prompt selection
 
-New instances start with the source image unchanged. Drag a loose AI add box to select;
-optional **DETAIL ON** tries to recover more foliage, but can retain unwanted background.
+New instances start with the source image unchanged. Drag a loose AI add box, or click an
+**ADD POINT** prompt, to select; optional **DETAIL ON** tries to recover more foliage, but can
+retain unwanted background.
 See [08-ai-box-selection.md](08-ai-box-selection.md) for setup, controls and limitations.
 The new detail recovery and labelled toolbar still require Windows/Resolve validation.
 
@@ -26,7 +27,7 @@ algorithm**, and it does not track moving objects. See the [step-by-step guide](
 
 ## Current controls and log location
 
-For the legacy automatic workflow, choose **Automatic + manual corrections** and **U2NetP (AI, CPU)** under **Automatic Model (legacy)** after installing the AI files and restarting Resolve. AI box selection uses EfficientSAM instead. Existing effects may retain **No AI model** and need to be switched manually. Matte Bias,
+For the legacy automatic workflow, choose **Automatic + manual corrections** and **U2NetP (AI, CPU)** under **Automatic Model (legacy)** after installing the AI files and restarting Resolve. AI prompt selection uses EfficientSAM instead. Existing effects may retain **No AI model** and need to be switched manually. Matte Bias,
 invert and output controls apply to AI; Background Colour Tolerance and Softness apply only to the
 colour key. Edge refinement, GPU and temporal features are not implemented yet. AI is fixed at
 320×320, may be slow on CPU and is not expected to produce fine hair-level matting.

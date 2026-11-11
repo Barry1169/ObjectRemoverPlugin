@@ -381,18 +381,18 @@ Result defineParameters(OfxParamSetHandle paramSet, const std::vector<ModelChoic
                  pname::kGroupRefine, 0.0, -0.5, 0.5, -0.2, 0.2);
 
     defineChoice(d, pname::kSelectionMode, "Viewer Selection Method (experimental)",
-                 "Ready leaves the image untouched until you draw an AI add box. The other modes explicitly enable the legacy automatic matte or AI box selection. AI box requires the optional EfficientSAM model.",
-                 pname::kGroupRefine, {"Automatic + manual corrections", "Automatic + guided selection", "AI box selection (experimental)", "Ready (no automatic removal)"}, 3);
-    defineBool(d, pname::kBoxDetailRecovery, "AI Box: Recover More Detail (experimental)",
-               "Tries an additional overlapping AI mask for add boxes to recover missing foliage and branches. It may also retain sky; turn off if the result is worse. Remove boxes are unchanged.",
+                 "Ready leaves the image untouched until you add an AI box or point prompt. The other modes explicitly enable the legacy automatic matte or the AI prompt selector. AI prompts require the optional EfficientSAM model.",
+                 pname::kGroupRefine, {"Automatic + manual corrections", "Automatic + guided selection", "AI box/point selection (experimental)", "Ready (no automatic removal)"}, 3);
+    defineBool(d, pname::kBoxDetailRecovery, "AI Prompts: Recover More Detail (experimental)",
+               "Tries an additional overlapping AI mask for add boxes to recover missing foliage and branches. It may also retain sky; turn off if the result is worse. Remove prompts and point prompts are unchanged.",
                pname::kGroupRefine, false);
     defineChoice(d, pname::kGuidedBrushBehavior, "Guided Brush Behaviour",
                  "Direct corrections preserve the original behaviour. Samples only uses strokes as selection guidance without a full-resolution painted patch. Only affects Guided selection; both foreground and background samples are needed.",
                  pname::kGroupRefine, {"Direct corrections + samples", "Samples only (experimental)"}, 0);
     defineChoice(d, pname::kBrushMode, "Viewer Brush (experimental)",
                  "Enable Open FX Overlay, then draw an outline or paint Keep/Remove markings. "
-                 "Keep/Remove paint or guide the matte. AI add/remove box selects predicted objects inside or near rough rectangles; it requires the optional model.",
-                 pname::kGroupRefine, {"Off", "Keep (green)", "Remove (red)", "Outline (guided)", "AI add box", "AI remove box"}, 4);
+                 "Keep/Remove paint or guide the matte. AI add/remove box selects predicted objects inside or near rough rectangles. AI add/remove point selects the object under a single click and unites it with, or subtracts it from, the other prompts. The AI tools require the optional model.",
+                 pname::kGroupRefine, {"Off", "Keep (green)", "Remove (red)", "Outline (guided)", "AI add box", "AI remove box", "AI add point", "AI remove point"}, 4);
     defineDouble(d, pname::kBrushRadius, "Viewer Brush Radius",
                  "Brush radius in full-resolution image pixels.", pname::kGroupRefine,
                  25.0, 1.0, 200.0, 1.0, 150.0);
