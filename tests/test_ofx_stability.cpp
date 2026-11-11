@@ -63,6 +63,7 @@ struct FakeHost {
     std::string modelValue = "__fallback__";
     std::string guidancePath, brushData, warning;
     int brushMode = 0, selectionMode = 0, brushBehavior = 0, detailRecovery = 0, redraws = 0;
+    int promptRecompute = 0;
     double brushRadius = 6;
     OfxImageEffectHandle effect() { return reinterpret_cast<OfxImageEffectHandle>(&effectToken); }
     OfxParamSetHandle paramSet() { return reinterpret_cast<OfxParamSetHandle>(&paramToken); }
@@ -94,6 +95,7 @@ OfxStatus getParameterAtTime(OfxParamHandle p, OfxTime time, ...) {
         std::strcmp(name, pname::kGuidedBrushBehavior) != 0 &&
         std::strcmp(name, pname::kSelectionMode) != 0 &&
         std::strcmp(name, pname::kBoxDetailRecovery) != 0 &&
+        std::strcmp(name, pname::kPromptRecompute) != 0 &&
         std::strcmp(name, pname::kBrushMode) != 0 &&
         std::strcmp(name, pname::kBrushRadius) != 0 &&
         std::strcmp(name, pname::kBrushData) != 0) return kOfxStatErrUnknown;
@@ -107,6 +109,8 @@ OfxStatus getParameterAtTime(OfxParamHandle p, OfxTime time, ...) {
         int* result = va_arg(args, int*); *result = current->selectionMode;
     } else if (std::strcmp(name, pname::kBoxDetailRecovery) == 0) {
         int* result = va_arg(args, int*); *result = current->detailRecovery;
+    } else if (std::strcmp(name, pname::kPromptRecompute) == 0) {
+        int* result = va_arg(args, int*); *result = current->promptRecompute;
     } else if (std::strcmp(name, pname::kBrushMode) == 0) {
         int* result = va_arg(args, int*); *result = current->brushMode;
     } else if (std::strcmp(name, pname::kBrushRadius) == 0) {
@@ -141,7 +145,7 @@ OfxStatus setParameterAtTime(OfxParamHandle p, OfxTime, ...) {
 }
 OfxStatus setParameter(OfxParamHandle p, ...) {
     const char* name = reinterpret_cast<const char*>(p);
-    if (std::strcmp(name, pname::kBrushData) && std::strcmp(name, pname::kBrushMode) && std::strcmp(name, pname::kSelectionMode) && std::strcmp(name, pname::kBoxDetailRecovery) && std::strcmp(name, pname::kGuidedBrushBehavior)) return kOfxStatErrUnknown;
+    if (std::strcmp(name, pname::kBrushData) && std::strcmp(name, pname::kBrushMode) && std::strcmp(name, pname::kSelectionMode) && std::strcmp(name, pname::kBoxDetailRecovery) && std::strcmp(name, pname::kPromptRecompute) && std::strcmp(name, pname::kGuidedBrushBehavior)) return kOfxStatErrUnknown;
     va_list args; va_start(args, p);
     if (!std::strcmp(name, pname::kBrushData)) {
         const char* value = va_arg(args, const char*); current->brushData = value ? value : "";
@@ -211,7 +215,7 @@ FakeHost::FakeHost() {
             std::strcmp(name, pname::kShiftMatte) && std::strcmp(name, pname::kFallbackKeyTolerance) &&
             std::strcmp(name, pname::kFallbackKeySoftness) && std::strcmp(name, pname::kModel) &&
             std::strcmp(name, pname::kGuidancePath) && std::strcmp(name, pname::kBrushData) &&
-            std::strcmp(name, pname::kBrushMode) && std::strcmp(name, pname::kBrushRadius) && std::strcmp(name, pname::kSelectionMode) && std::strcmp(name, pname::kBoxDetailRecovery) && std::strcmp(name, pname::kGuidedBrushBehavior)) return kOfxStatErrUnknown;
+            std::strcmp(name, pname::kBrushMode) && std::strcmp(name, pname::kBrushRadius) && std::strcmp(name, pname::kSelectionMode) && std::strcmp(name, pname::kBoxDetailRecovery) && std::strcmp(name, pname::kPromptRecompute) && std::strcmp(name, pname::kGuidedBrushBehavior)) return kOfxStatErrUnknown;
         *out = reinterpret_cast<OfxParamHandle>(const_cast<char*>(name)); return kOfxStatOK;
     };
     params.paramGetValueAtTime = getParameterAtTime;
@@ -673,6 +677,19 @@ TEST(ofxStability, newEffectAndEmptyBoxModeDoNotApplyAutomaticModel) {
     CHECK_EQ(pluginMain(kOfxImageEffectActionRender,host.effect(),handle(host.args),nullptr),kOfxStatOK);
     CHECK(host.output==host.source);
     if(instance) CHECK(instance->pipeline().matteSource()==nullptr);
+    CHECK_EQ(pluginMain(kOfxActionDestroyInstance,host.effect(),nullptr,nullptr),kOfxStatOK);
+}
+
+TEST(ofxStability, promptRecomputeParameterDefaultsToEveryFrame) {
+    FakeHost host; setModelUsesStrChoice(false);
+    CHECK(defineParameters(host.paramSet(), {}).ok());
+    CHECK_EQ(host.definitions[pname::kPromptRecompute].ints[kOfxParamPropDefault][0], 0);
+    CHECK_EQ(static_cast<int>(host.definitions[pname::kPromptRecompute].strings[kOfxParamPropChoiceOption].size()), 3);
+    // Changing the policy is a normal parameter change and must not break a render.
+    host.selectionMode=2; host.brushMode=4; host.promptRecompute=1;
+    host.brushData=aibgr::serialiseBrushStrokes({{true,1,{{10,10},{50,50}},false,true}});
+    CHECK_EQ(pluginMain(kOfxActionCreateInstance,host.effect(),nullptr,nullptr),kOfxStatOK);
+    CHECK_EQ(pluginMain(kOfxImageEffectActionRender,host.effect(),handle(host.args),nullptr),kOfxStatOK);
     CHECK_EQ(pluginMain(kOfxActionDestroyInstance,host.effect(),nullptr,nullptr),kOfxStatOK);
 }
 

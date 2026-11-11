@@ -41,7 +41,10 @@ It needs testing on the actual image; do not assume it will recover the whole tr
   discarded and logged; the host is also sent a warning when available. Use shorter strokes,
   Undo or Clear if needed. Complex strokes and colour-aware upsampling add CPU render time.
 - Marks are static image coordinates, **not motion tracking** or temporal propagation. The model
-  runs on CPU per frame; guided selection adds CPU work. Results may differ on proxies and exports.
+  runs on CPU per frame; guided selection adds CPU work. On a video clip the AI prompt tools
+  recompute on every frame unless **AI Prompts: Recompute** is set to a reuse policy; see
+  [video, playback and speed](08-ai-box-selection.md#video-playback-and-speed).
+  Results may differ on proxies and exports.
 - Existing saved explicit manual/guided indices and strokes are still read, but hosts may use the
   new Ready default for parameters omitted from old projects. Verify old instances after updating. Outline data, and projects with more than 512 stored points,
   use newer formats which older plugin builds cannot read; save a separate project copy before

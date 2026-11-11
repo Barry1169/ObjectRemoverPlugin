@@ -98,3 +98,55 @@ TEST(boxSelection, realModelPointPromptWhenProvided) {
     CHECK(selector.refine(image,removed).ok());
     CHECK(removed.at(200,H-1-90)<0.1f);
 }
+
+TEST(boxSelection, reusePolicyReturnsCachedMatteForNewFramesButNotNewPrompts) {
+    const char* runtime=std::getenv("AIBGR_TEST_ORT");
+    const char* enc=std::getenv("AIBGR_TEST_BOX_ENCODER"), *dec=std::getenv("AIBGR_TEST_BOX_DECODER");
+    if(!runtime||!enc||!dec) return;
+    const int W=640,H=360;
+    auto makeFrame=[&](float offset){
+        FloatImage image(W,H);
+        for(int y=0;y<H;++y) for(int x=0;x<W;++x) {
+            float* p=image.pixel(x,y); p[0]=0.06f+offset; p[1]=0.08f; p[2]=0.30f; p[3]=1.0f;
+        }
+        for(int ytd=40;ytd<160;++ytd) {
+            const int y=H-1-ytd;
+            for(int x=120;x<300;++x) { float* p=image.pixel(x,y); p[0]=0.9f;p[1]=0.5f;p[2]=0.1f;p[3]=1.0f; }
+        }
+        return image;
+    };
+    FloatImage first=makeFrame(0.0f), second=makeFrame(0.04f); // a "next frame": same prompts, new pixels
+    BoxSelector selector;
+    auto loaded=selector.open(runtime,enc,dec); CHECK_MSG(loaded.ok(),loaded.toString());
+    if(!loaded.ok()) return;
+    FrameContext ctx; ctx.renderWindow={0,0,W,H};
+    BrushStroke box{true,1,{{100,205},{300,335}},false,true};
+
+    selector.configure({box},ctx);
+    Matte frameA(W,H); frameA.fill(0.5f);
+    CHECK(selector.refine(first,frameA).ok());
+    CHECK(frameA.at(200,H-1-90)>0.5f);
+
+    // Reuse OFF: the new frame is a real cache miss and is computed (still correct).
+    Matte frameB(W,H); frameB.fill(0.5f);
+    CHECK(selector.refine(second,frameB).ok());
+    CHECK(frameB.at(200,H-1-90)>0.5f);
+
+    // Reuse ON with the same prompts: the previously computed matte comes back untouched, which is
+    // what makes playback responsive. Identical to frameA's result because the geometry is stable.
+    selector.configure({box},ctx,false,true);
+    Matte reused(W,H); reused.fill(0.5f);
+    CHECK(selector.refine(second,reused).ok());
+    for(size_t i=0;i<reused.floatCount();++i) CHECK_NEAR(reused.data()[i],frameB.data()[i],1e-6);
+
+    // A new prompt must invalidate the reuse, even while playing.
+    BrushStroke added{true,1,{{40,40}},false,false,true};
+    selector.configure({box,added},ctx,false,true);
+    Matte changed(W,H); changed.fill(0.5f);
+    CHECK(selector.refine(second,changed).ok());
+    CHECK(changed.at(200,H-1-90)>0.5f);
+    // ... and it differs from the reused matte, i.e. the model ran again.
+    size_t differences=0;
+    for(size_t i=0;i<changed.floatCount();++i) if(std::abs(changed.data()[i]-reused.data()[i])>0.01f) ++differences;
+    CHECK(differences>0);
+}

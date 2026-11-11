@@ -283,6 +283,14 @@ Result readSettings(OfxParamSetHandle paramSet, double time, PipelineSettings& o
     wantInt(pname::kCacheSizeMB, out.cacheSizeMB);
     wantInt(pname::kThreads, out.intraOpThreads);
 
+    int recompute = 0;
+    wantInt(pname::kPromptRecompute, recompute);
+    switch (recompute) {
+    case 1: out.promptRecompute = PromptRecompute::WhilePlaying; break;
+    case 2: out.promptRecompute = PromptRecompute::OncePerPromptChange; break;
+    default: out.promptRecompute = PromptRecompute::EveryFrame; break;
+    }
+
     wantDouble(pname::kTemporalStrength, out.temporalStrength);
     wantDouble(pname::kMotionSensitivity, out.motionSensitivity);
 

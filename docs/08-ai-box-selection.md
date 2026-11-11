@@ -66,15 +66,50 @@ The model runs on CPU. The embedding and the finished matte are cached per effec
 instance and reused while the input pixels and prompts remain unchanged; a cache hit
 costs a hash of the frame plus a copy and composite of the matte (measured at about
 15 ms for 1080p and 60 ms for UHD on one test machine, down from 69 ms and 280 ms),
-while changing frames requires re-encoding.
-The encoder itself always rescales its input to a square working resolution, so a
-wide frame is stretched inside the model; the returned mask is mapped back to the
-frame, so the geometry stays correct. Model output
-is at most 1024 pixels on its long edge and edge-aware upscaled. It has no motion
-tracking. If the model/runtime is missing or inference fails, box mode passes the
-original frame through unchanged and records the error in `log.txt`; **Retry AI Load**
-retries loading on the next render. The experimental detail mode can produce false
-positives or fail to recover branches.
+while changing frames requires re-encoding. The encoder itself always rescales its
+input to a square working resolution, so a wide frame is stretched inside the model;
+the returned mask is mapped back to the frame, so the geometry stays correct. Model
+output is at most 1024 pixels on its long edge and edge-aware upscaled. It has no
+motion tracking. If the model/runtime is missing or inference fails, box mode passes
+the original frame through unchanged and records the error in `log.txt`; **Retry AI
+Load** retries loading on the next render. The experimental detail mode can produce
+false positives or fail to recover branches.
+
+## Video, playback and speed
+
+A still image is the easy case. Every frame of a still clip has the same pixels, so
+after the first frame the matte is a cache hit and the model never runs again. A
+video changes pixels on every frame, so the cache misses and the encoder and decoder
+run again for each one. That is why the same prompt that feels instant on a photo
+makes playback crawl: the cost is not the drawing or the prompts, it is one CPU
+inference per frame, and on CPU that inference is far slower than a video frame.
+
+Three settings reduce it:
+
+- **AI Prompts: Recompute** (Inspector, *Refine* group) decides what playback does.
+  **Every frame (accurate)** recomputes on every frame and follows motion exactly; it
+  is the default and the right choice for a final render. **Reuse while playing
+  (smooth)** keeps the last computed selection while the host is in interactive
+  playback or draft mode, so playback only pays the matte copy and the composite, and
+  the first frame after playback stops is recomputed. **Once per prompt change
+  (stills)** never follows motion and recomputes only when a prompt or the input
+  changes, which suits stills and locked-off shots. Any change to the prompt set
+  always invalidates the reuse, in every mode.
+- **CPU Threads** (Inspector, *Performance* group) sets the ONNX intra-op thread
+  count. `0` means automatic: every core, capped at 8 so Resolve keeps some CPU.
+  Earlier builds hardcoded 2 threads whatever the machine, so an 8- or 16-core CPU
+  sat mostly idle. Changing the value reloads the model on the next render.
+- **Fewer prompts first.** One loose box is usually enough. Each extra prompt is
+  another decoder pass, and detail recovery adds extra full-resolution work for every
+  add box.
+
+Measured on the supplied model on a two-core test machine at 720p: about 1.6 s per
+frame with **Every frame**, against about 5 ms per frame with either reuse policy
+after the first frame. That is the difference between roughly half a frame per second
+and real-time playback, and it is why a still looked fine while a video did not.
+Reused frames keep the previous selection, so a moving subject visibly lags its
+outline during playback; that lag is the price of smooth playback, not a bug. Switch
+back to **Every frame** before judging accuracy or rendering.
 
 The legacy automatic U2NetP/key modes are still available explicitly under Viewer
 Selection Method; the **Automatic Model (legacy)** setting applies only to those

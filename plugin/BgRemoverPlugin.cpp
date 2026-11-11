@@ -446,10 +446,17 @@ Result PluginInstance::render(double time, OfxPropertySetHandle inArgs) {
             // Ready and prompt-free AI modes must never run either the old AI or the colour key.
             if (selectionMode == 3 || (selectionMode == 2 && !hasPrompt)) settings.enable = false;
             const bool useAi = selectionMode != 2 && selectionMode != 3 && settings.model == ModelId::SmallMatte && !isPassThrough(settings) && !ctx.thumbnailRender;
+            if (settings.intraOpThreads != aiThreads_) {
+                // The thread count is baked into the ONNX sessions; reopen with the new value.
+                aiThreads_ = settings.intraOpThreads;
+                aiSegmenter_.reset();
+                aiLoadAttempted_ = false;
+            }
             if (useAi && !aiSegmenter_ && !aiLoadAttempted_) {
                 aiLoadAttempted_ = true;
                 auto candidate = std::make_unique<U2NetSegmenter>();
-                const Result loaded = candidate->open(aiRuntimePath(), aiModelPath());
+                const Result loaded = candidate->open(aiRuntimePath(), aiModelPath(),
+                                                      settings.intraOpThreads);
                 if (loaded.ok()) {
                     aiSegmenter_ = std::move(candidate);
                     AIBGR_LOGI("AI loaded: U2NetP CPU (320x320), model=%s", aiModelPath().c_str());
@@ -470,15 +477,28 @@ Result PluginInstance::render(double time, OfxPropertySetHandle inArgs) {
                 selection_.configure(strokes, ctx);
                 pipeline_->setSelectionRefiner(&selection_);
             } else if (selectionMode == 2 && hasPrompt) {
+                if (settings.intraOpThreads != boxThreads_) {
+                    boxThreads_ = settings.intraOpThreads;
+                    boxSelection_.clearCache();
+                    boxLoadAttempted_ = false;
+                    boxLoaded_ = false;
+                }
                 if (!boxLoadAttempted_ && !ctx.thumbnailRender && !isPassThrough(settings)) {
                     boxLoadAttempted_=true;
                     const auto models=joinPath(workspaceDir(),"models");
-                    const Result loaded=boxSelection_.open(aiRuntimePath(),joinPath(models,"efficientsam_ti_encoder.onnx"),joinPath(models,"efficientsam_ti_decoder.onnx"));
+                    const Result loaded=boxSelection_.open(aiRuntimePath(),joinPath(models,"efficientsam_ti_encoder.onnx"),joinPath(models,"efficientsam_ti_decoder.onnx"),settings.intraOpThreads);
                     boxLoaded_=loaded.ok();
                     if(boxLoaded_) AIBGR_LOGI("AI box selection loaded (EfficientSAM-Ti CPU)");
                     else AIBGR_LOGE("AI box selection unavailable: %s",loaded.toString().c_str());
                 }
-                if(boxLoaded_) { boxSelection_.configure(strokes,ctx,recoverDetail != 0); pipeline_->setSelectionRefiner(&boxSelection_); pipeline_->setSelectionOnly(true); }
+                if(boxLoaded_) {
+                    // A new video frame cannot be a cache hit: either pay for inference on every
+                    // frame or reuse the previous matte, per the inspector's Recompute policy.
+                    const bool interacting = ctx.interactiveRender || ctx.draftQuality;
+                    const bool reuse = reusePromptResult(settings.promptRecompute, interacting);
+                    boxSelection_.configure(strokes,ctx,recoverDetail != 0, reuse);
+                    pipeline_->setSelectionRefiner(&boxSelection_); pipeline_->setSelectionOnly(true);
+                }
                 else { pipeline_->setSelectionRefiner(nullptr); settings.enable=false; }
             } else pipeline_->setSelectionRefiner(nullptr);
             brush_.configure(std::move(strokes), ctx);

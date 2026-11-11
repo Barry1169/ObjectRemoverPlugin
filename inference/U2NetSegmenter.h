@@ -16,7 +16,10 @@ public:
     U2NetSegmenter(const U2NetSegmenter&) = delete;
     U2NetSegmenter& operator=(const U2NetSegmenter&) = delete;
 
-    Result open(const std::string& runtimePath, const std::string& modelPath);
+    /// `intraOpThreads` 0 = automatic (all cores, capped at 8). Baked into the ONNX session, so a
+    /// new value needs a new open().
+    Result open(const std::string& runtimePath, const std::string& modelPath,
+                int intraOpThreads = 0);
     Result acquire(const FloatImage& image, Matte& out) override;
     const char* name() const noexcept override { return "U2NetP CPU"; }
 private:

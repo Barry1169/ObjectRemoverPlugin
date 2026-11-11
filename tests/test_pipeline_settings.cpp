@@ -229,3 +229,34 @@ TEST(hash, fastContentHashIsStableSensitiveAndLengthAware) {
     CHECK_EQ(chained, fastHashBytes(fastHashBytes(3, "ab", 2), "cd", 2));
     CHECK(fastHashBytes(fastHashBytes(3, "cd", 2), "ab", 2) != chained);
 }
+
+TEST(pipelineSettings, promptRecomputePolicyDecidesWhenToReuse) {
+    // "Every frame" is the accurate default: a new video frame always re-runs the model.
+    CHECK(!reusePromptResult(PromptRecompute::EveryFrame, false));
+    CHECK(!reusePromptResult(PromptRecompute::EveryFrame, true));
+    // "Reuse while playing" only skips work for interactive/draft renders; a final render is
+    // always accurate, so delivery can never silently use a stale matte.
+    CHECK(!reusePromptResult(PromptRecompute::WhilePlaying, false));
+    CHECK(reusePromptResult(PromptRecompute::WhilePlaying, true));
+    // "Once per prompt change" ignores motion entirely.
+    CHECK(reusePromptResult(PromptRecompute::OncePerPromptChange, false));
+    CHECK(reusePromptResult(PromptRecompute::OncePerPromptChange, true));
+
+    PipelineSettings defaults;
+    CHECK(defaults.promptRecompute == PromptRecompute::EveryFrame);
+    CHECK_EQ(std::string(promptRecomputeName(defaults.promptRecompute)),
+             std::string("Every frame"));
+
+    // A hand-edited project cannot inject an out-of-range choice.
+    PipelineSettings wild;
+    wild.promptRecompute = static_cast<PromptRecompute>(200);
+    wild.sanitise();
+    CHECK(wild.promptRecompute == PromptRecompute::EveryFrame);
+
+    wild.intraOpThreads = 9999;
+    wild.sanitise();
+    CHECK_EQ(wild.intraOpThreads, 64);
+    wild.intraOpThreads = -5;
+    wild.sanitise();
+    CHECK_EQ(wild.intraOpThreads, 0);
+}

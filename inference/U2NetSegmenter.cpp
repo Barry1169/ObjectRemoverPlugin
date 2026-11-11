@@ -9,6 +9,7 @@
 #include <cmath>
 #include <limits>
 #include <stdexcept>
+#include <thread>
 #include <vector>
 #if defined(_WIN32)
 #ifndef WIN32_LEAN_AND_MEAN
@@ -90,7 +91,7 @@ struct U2NetSegmenter::Impl {
         } catch (...) { api->ReleaseTypeInfo(type); throw; }
         api->ReleaseTypeInfo(type);
     }
-    void load(const std::string& runtime, const std::string& model) {
+    void load(const std::string& runtime, const std::string& model, int intraOpThreads) {
 #if defined(_WIN32)
         const auto libPath = widen(runtime);
         library = libPath.empty() ? nullptr : LoadLibraryExW(libPath.c_str(), nullptr, LOAD_WITH_ALTERED_SEARCH_PATH);
@@ -107,7 +108,10 @@ struct U2NetSegmenter::Impl {
         if (!api) throw std::runtime_error("ONNX Runtime API version 16 is unavailable (requires 1.16+)");
         check(api->CreateEnv(ORT_LOGGING_LEVEL_WARNING, "aibgr", &env));
         check(api->CreateSessionOptions(&options));
-        check(api->SetIntraOpNumThreads(options, 2));
+        const unsigned wanted = intraOpThreads > 0 ? static_cast<unsigned>(intraOpThreads)
+                                                   : std::thread::hardware_concurrency();
+        const int threads = static_cast<int>(std::min(std::max(wanted, 1u), 8u));
+        check(api->SetIntraOpNumThreads(options, threads));
 #if defined(_WIN32)
         const auto modelWide = widen(model);
         if (modelWide.empty()) throw std::runtime_error("invalid model path");
@@ -195,12 +199,13 @@ struct U2NetSegmenter::Impl {
 
 U2NetSegmenter::U2NetSegmenter() = default;
 U2NetSegmenter::~U2NetSegmenter() = default;
-Result U2NetSegmenter::open(const std::string& runtime, const std::string& model) {
+Result U2NetSegmenter::open(const std::string& runtime, const std::string& model,
+                            int intraOpThreads) {
     impl_.reset();
     try {
         if (!fileExists(runtime) || !fileExists(model)) return Result::fail(Status::NotFound, "AI runtime or model is missing");
         auto impl = std::make_unique<Impl>();
-        impl->load(runtime, model);
+        impl->load(runtime, model, intraOpThreads);
         impl_ = std::move(impl);
         return Result::success();
     } catch (const std::exception& e) { return Result::fail(Status::BackendError, e.what()); }

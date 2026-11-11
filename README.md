@@ -158,6 +158,11 @@ script succeeds.
 5. Try **DETAIL ON** if details are missing, and turn it off if it makes the
    mask worse. Inspect **Matte Only** or **Foreground Only** in the Inspector
    and check the final output.
+6. On a video, every frame is new, so the AI runs again on each one and playback
+   is slow. Set **AI Prompts: Recompute** to **Reuse while playing (smooth)** in
+   the Inspector to keep the current selection during playback and recompute
+   when it stops; switch back to **Every frame (accurate)** before rendering.
+   See [video and playback speed](docs/08-ai-box-selection.md#video-playback-and-speed).
 
 If the toolbar is not visible, ensure the effect is selected and Open FX Overlay
 is enabled, then try zooming out or fitting the image. Inspector controls are
@@ -176,6 +181,13 @@ See [the AI prompt guide](docs/08-ai-box-selection.md) for further detail.
   installing missing files use **Retry AI Load** or restart Resolve. Fallback
   log locations include `%ProgramData%\AiBgRemover\log.txt` and
   `%LOCALAPPDATA%\AiBgRemover\log.txt`.
+- **Playback is slow on a video, but a still image is fine:** this is expected on
+  CPU. A still has identical pixels on every frame, so the cached matte is reused;
+  a video changes every frame, so the model runs once per frame. Set **AI
+  Prompts: Recompute** to **Reuse while playing (smooth)** or **Once per prompt
+  change (stills)**, set **CPU Threads** to `0` so every core is used, and use as
+  few prompts as possible. See
+  [the AI prompt guide](docs/08-ai-box-selection.md#video-playback-and-speed).
 - **Output is inaccurate:** try a different loose box or point, add/remove prompts, or
   toggle detail recovery. None of these guarantees a correct matte.
 - **Update an existing checkout:** back up projects and the installed bundle,

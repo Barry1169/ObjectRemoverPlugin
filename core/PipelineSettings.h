@@ -38,6 +38,30 @@ enum class QualityPreset : uint8_t {
 int qualityResolution(QualityPreset q) noexcept;
 const char* qualityName(QualityPreset q) noexcept;
 
+/// Mirrors `aiPromptRecompute`: how often a prompt-based selector may re-run the model.
+///
+/// A still image is a cache hit on every frame, so it is cheap regardless. Video is not: every
+/// frame is new pixels, and one CPU encoder pass costs on the order of a second. This policy is the
+/// honest choice between accuracy and playback speed.
+enum class PromptRecompute : uint8_t {
+    EveryFrame = 0,        ///< follow motion exactly, at per-frame inference cost
+    WhilePlaying,          ///< reuse the last matte during interactive playback only
+    OncePerPromptChange,   ///< never follow motion; recompute only when prompts/settings change
+};
+
+const char* promptRecomputeName(PromptRecompute p) noexcept;
+
+/// True when a selector may return its previous matte instead of recomputing. `interacting` is the
+/// host's interactive/draft flag for this render; it only matters for WhilePlaying.
+inline bool reusePromptResult(PromptRecompute policy, bool interacting) noexcept {
+    switch (policy) {
+    case PromptRecompute::WhilePlaying: return interacting;
+    case PromptRecompute::OncePerPromptChange: return true;
+    case PromptRecompute::EveryFrame: break;
+    }
+    return false;
+}
+
 /// Mirrors `processingResolution`.
 enum class ProcessingResolutionMode : uint8_t {
     FollowHost = 0,
@@ -98,6 +122,9 @@ struct PipelineSettings {
     float backgroundTransparency = 1.0f; // 0..1
     bool matteInvert = false;
     Premultiplication outputPremultiplication = Premultiplication::Unknown; // Unknown = follow host
+
+    // --- AI prompts (box/point selection) ---
+    PromptRecompute promptRecompute = PromptRecompute::EveryFrame;
 
     // --- Performance ---
     ProcessingResolutionMode processingResolution = ProcessingResolutionMode::FollowHost;

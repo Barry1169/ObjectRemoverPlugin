@@ -8,6 +8,7 @@
 #include <cmath>
 #include <cstring>
 #include <stdexcept>
+#include <thread>
 #include <vector>
 #if defined(_WIN32)
 #ifndef NOMINMAX
@@ -30,6 +31,15 @@ constexpr size_t kMaxPrompts = 32;
 /// input to its own square working resolution internally, so this only bounds the cost of the
 /// resample and of the embedding.
 constexpr int kMaxEncoderEdge = 1024;
+/// Upper bound on intra-op threads. Beyond this a 1024x1024 ViT-Ti stops scaling, and leaving some
+/// CPU for the host's own render threads matters more than the last few percent.
+constexpr unsigned kMaxIntraOpThreads = 8;
+
+unsigned resolveThreads(int requested) noexcept {
+    const unsigned wanted = requested > 0 ? static_cast<unsigned>(requested)
+                                          : std::thread::hardware_concurrency();
+    return std::min(std::max(wanted, 1u), kMaxIntraOpThreads);
+}
 
 struct Value {
     const OrtApi* api;
@@ -70,6 +80,10 @@ struct BoxSelector::Impl {
     std::vector<float> input;
     uint64_t maskHash = 0;
     bool maskValid = false;
+    /// Key over everything except image content: the prompt list, the coordinate mapping and the
+    /// detail option. Lets a new frame reuse the previous matte without hashing the frame at all.
+    uint64_t promptHash = 0;
+    bool promptHashValid = false;
 
     ~Impl() {
         if (api) {
@@ -95,7 +109,7 @@ struct BoxSelector::Impl {
     }
 
     void load(const std::string& runtime, const std::string& encoderPath,
-              const std::string& decoderPath) {
+              const std::string& decoderPath, int intraOpThreads) {
 #if defined(_WIN32)
         const auto runtimeWide = widen(runtime);
         library = runtimeWide.empty()
@@ -116,7 +130,9 @@ struct BoxSelector::Impl {
 
         check(api->CreateEnv(ORT_LOGGING_LEVEL_WARNING, "aibgr-box", &env));
         check(api->CreateSessionOptions(&options));
-        check(api->SetIntraOpNumThreads(options, 2));
+        // 2 was a fixed placeholder: on a multi-core machine it left most of the CPU idle and made
+        // every video frame several times slower than it needed to be.
+        check(api->SetIntraOpNumThreads(options, static_cast<int>(resolveThreads(intraOpThreads))));
 #if defined(_WIN32)
         const auto encoderWide = widen(encoderPath);
         const auto decoderWide = widen(decoderPath);
@@ -308,26 +324,35 @@ struct BoxSelector::Impl {
     }
 
     void calculate(const FloatImage& image, const std::vector<BrushStroke>& strokes,
-                   const FrameContext& ctx, bool recoverDetail, Matte& matte) {
+                   const FrameContext& ctx, bool recoverDetail, bool reuseCached, Matte& matte) {
         const int iw = image.width();
         const int ih = image.height();
 
-        // Key the cached matte on everything it depends on: the frame content itself (it guides the
-        // edge-aware upscale), the coordinate mapping, the prompt list and the detail option. This
-        // is computed BEFORE encode() so a cache hit never pays for the downscale that only the
-        // encoder and the upscale guide need.
-        uint64_t hash = 14695981039346656037ULL;
-        hash = hashBytes(hash, &ctx.renderScaleX, sizeof(ctx.renderScaleX));
-        hash = hashBytes(hash, &ctx.renderScaleY, sizeof(ctx.renderScaleY));
-        hash = hashBytes(hash, &ctx.pixelAspectX, sizeof(ctx.pixelAspectX));
-        hash = hashBytes(hash, &ctx.renderWindow.x1, sizeof(ctx.renderWindow.x1));
-        hash = hashBytes(hash, &ctx.renderWindow.y1, sizeof(ctx.renderWindow.y1));
-        hash = hashBytes(hash, &iw, sizeof(iw));
-        hash = hashBytes(hash, &ih, sizeof(ih));
-        hash = hashBytes(hash, image.data(), image.floatCount() * sizeof(float));
-        hash = hashBytes(hash, &recoverDetail, sizeof(recoverDetail));
+        // Two keys. `prompt` covers the prompts and the coordinate mapping only; `hash` adds the
+        // frame content (which guides the edge-aware upscale). Both are computed BEFORE encode() so
+        // a cache hit never pays for the downscale that only the encoder and the upscale guide need.
         const std::string key = serialiseBrushStrokes(strokes);
-        hash = hashBytes(hash, key.data(), key.size());
+        uint64_t prompt = 14695981039346656037ULL;
+        prompt = hashBytes(prompt, &ctx.renderScaleX, sizeof(ctx.renderScaleX));
+        prompt = hashBytes(prompt, &ctx.renderScaleY, sizeof(ctx.renderScaleY));
+        prompt = hashBytes(prompt, &ctx.pixelAspectX, sizeof(ctx.pixelAspectX));
+        prompt = hashBytes(prompt, &ctx.renderWindow.x1, sizeof(ctx.renderWindow.x1));
+        prompt = hashBytes(prompt, &ctx.renderWindow.y1, sizeof(ctx.renderWindow.y1));
+        prompt = hashBytes(prompt, &iw, sizeof(iw));
+        prompt = hashBytes(prompt, &ih, sizeof(ih));
+        prompt = hashBytes(prompt, &recoverDetail, sizeof(recoverDetail));
+        prompt = hashBytes(prompt, key.data(), key.size());
+
+        // Video playback: the prompts have not changed, so the previous matte is reused without
+        // touching the frame at all. This is what keeps interactive playback responsive, and it is
+        // opt-in (PipelineSettings::PromptRecompute) because it cannot follow motion.
+        if (reuseCached && maskValid && promptHashValid && prompt == promptHash &&
+            full.width() == iw && full.height() == ih) {
+            std::copy(full.data(), full.data() + full.floatCount(), matte.data());
+            return;
+        }
+
+        uint64_t hash = hashBytes(prompt, image.data(), image.floatCount() * sizeof(float));
         if (maskValid && hash == maskHash && full.width() == iw && full.height() == ih) {
             std::copy(full.data(), full.data() + full.floatCount(), matte.data());
             return;
@@ -388,6 +413,8 @@ struct BoxSelector::Impl {
         resizeEdgeAware(small, scaled, image, full);
         maskHash = hash;
         maskValid = true;
+        promptHash = prompt;
+        promptHashValid = true;
         std::copy(full.data(), full.data() + full.floatCount(), matte.data());
     }
 };
@@ -396,14 +423,14 @@ BoxSelector::BoxSelector() = default;
 BoxSelector::~BoxSelector() = default;
 
 Result BoxSelector::open(const std::string& runtime, const std::string& encoder,
-                         const std::string& decoder) {
+                         const std::string& decoder, int intraOpThreads) {
     impl_.reset();
     try {
         if (!fileExists(runtime) || !fileExists(encoder) || !fileExists(decoder)) {
             return Result::fail(Status::NotFound, "AI box model/runtime not installed");
         }
         auto impl = std::make_unique<Impl>();
-        impl->load(runtime, encoder, decoder);
+        impl->load(runtime, encoder, decoder, intraOpThreads);
         impl_ = std::move(impl);
         return Result::success();
     } catch (const std::exception& e) {
@@ -412,10 +439,11 @@ Result BoxSelector::open(const std::string& runtime, const std::string& encoder,
 }
 
 void BoxSelector::configure(std::vector<BrushStroke> strokes, FrameContext ctx,
-                            bool recoverDetail) {
+                            bool recoverDetail, bool reuseCached) {
     strokes_ = std::move(strokes);
     ctx_ = ctx;
     recoverDetail_ = recoverDetail;
+    reuseCached_ = reuseCached;
 }
 
 Result BoxSelector::refine(const FloatImage& image, Matte& matte) {
@@ -424,7 +452,7 @@ Result BoxSelector::refine(const FloatImage& image, Matte& matte) {
         return Result::fail(Status::InvalidArgument, "image/matte mismatch");
     }
     try {
-        impl_->calculate(image, strokes_, ctx_, recoverDetail_, matte);
+        impl_->calculate(image, strokes_, ctx_, recoverDetail_, reuseCached_, matte);
         return Result::success();
     } catch (const std::exception& e) {
         return Result::fail(Status::BackendError, e.what());
@@ -434,6 +462,7 @@ Result BoxSelector::refine(const FloatImage& image, Matte& matte) {
 void BoxSelector::clearCache() noexcept {
     if (!impl_) return;
     impl_->maskValid = false;
+    impl_->promptHashValid = false;
     impl_->embeddingValid = false;
     if (impl_->embedding) {
         impl_->api->ReleaseValue(impl_->embedding);

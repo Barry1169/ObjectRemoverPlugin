@@ -386,6 +386,11 @@ Result defineParameters(OfxParamSetHandle paramSet, const std::vector<ModelChoic
     defineBool(d, pname::kBoxDetailRecovery, "AI Prompts: Recover More Detail (experimental)",
                "Tries an additional overlapping AI mask for add boxes to recover missing foliage and branches. It may also retain sky; turn off if the result is worse. Remove prompts and point prompts are unchanged.",
                pname::kGroupRefine, false);
+    defineChoice(d, pname::kPromptRecompute, "AI Prompts: Recompute",
+                 "Video changes every frame, so the AI has to run again on each one; on CPU that is slow. "
+                 "Every frame follows motion exactly. Reuse while playing keeps the last selection during interactive playback and recomputes when playback stops or a prompt changes. Once per prompt change never follows motion and suits stills or locked-off shots.",
+                 pname::kGroupRefine, {"Every frame (accurate)", "Reuse while playing (smooth)",
+                                       "Once per prompt change (stills)"}, 0);
     defineChoice(d, pname::kGuidedBrushBehavior, "Guided Brush Behaviour",
                  "Direct corrections preserve the original behaviour. Samples only uses strokes as selection guidance without a full-resolution painted patch. Only affects Guided selection; both foreground and background samples are needed.",
                  pname::kGroupRefine, {"Direct corrections + samples", "Samples only (experimental)"}, 0);
@@ -483,8 +488,9 @@ Result defineParameters(OfxParamSetHandle paramSet, const std::vector<ModelChoic
     defineInt(d, pname::kCacheSizeMB, "Matte Cache Size (not implemented yet)", "Memory budget for the matte cache.",
               pname::kGroupPerf, 512, 0, 8192);
 
-    defineInt(d, pname::kThreads, "CPU Threads (not implemented yet)",
-              "Intra-op thread count for the CPU execution provider. 0 lets the runtime choose.",
+    defineInt(d, pname::kThreads, "CPU Threads",
+              "Intra-op threads for the ONNX Runtime CPU sessions. 0 = automatic: every core, capped "
+              "at 8 so Resolve keeps some CPU. Changing this reloads the model on the next render.",
               pname::kGroupPerf, 0, 0, 64);
 
     defineButton(d, pname::kPreloadModel, "Retry AI Load",

@@ -116,6 +116,10 @@ private:
     BoxSelector boxSelection_;
     bool boxLoadAttempted_ = false, boxLoaded_ = false;
     bool aiLoadAttempted_ = false;
+    /// Thread counts the open sessions were created with, so changing the inspector value reloads
+    /// the model instead of silently doing nothing.
+    int boxThreads_ = 0;
+    int aiThreads_ = 0;
     OfxAbortChecker abortChecker_;
 
     /// Clip handles and their property sets, fetched once per instance. The handles stay valid for

@@ -42,6 +42,15 @@ const char* gpuBackendName(GpuBackend b) noexcept {
     return "?";
 }
 
+const char* promptRecomputeName(PromptRecompute p) noexcept {
+    switch (p) {
+    case PromptRecompute::EveryFrame: return "Every frame";
+    case PromptRecompute::WhilePlaying: return "Reuse while playing";
+    case PromptRecompute::OncePerPromptChange: return "Once per prompt change";
+    }
+    return "?";
+}
+
 const char* modelIdName(ModelId m) noexcept {
     switch (m) {
     case ModelId::None: return "None (fallback key)";
@@ -100,6 +109,13 @@ void PipelineSettings::sanitise() noexcept {
 
     clampTo(temporalStrength, 0.0f, 1.0f);
     clampTo(motionSensitivity, 0.0f, 1.0f);
+
+    switch (promptRecompute) {
+    case PromptRecompute::EveryFrame:
+    case PromptRecompute::WhilePlaying:
+    case PromptRecompute::OncePerPromptChange: break;
+    default: promptRecompute = PromptRecompute::EveryFrame; break;
+    }
 }
 
 uint64_t PipelineSettings::rawMatteHash() const noexcept {
