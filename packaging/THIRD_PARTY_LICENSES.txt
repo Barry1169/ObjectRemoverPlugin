@@ -16,15 +16,20 @@ SUMMARY — WHAT IS IN THE BUNDLE
 
 Current repository:
 
-    AiBgRemover.ofx ................. this project, MIT
+    AiBgRemover.ofx ................. this project; see project licensing below
     THIRD_PARTY_LICENSES.txt ........ this file
     ONNX Runtime C API header ....... MIT (vendored source/header)
     stb_image PNG decoder ........... MIT (vendored; compiled into plugin)
 
+Individual project source files carry MIT SPDX headers, but the repository has no
+project-wide LICENSE file. The project owner should clarify licensing and copyright
+before distribution. Third-party components retain their own terms.
+
 No runtime DLL or model weights are included in the plugin bundle. The optional
-setup script separately downloads Microsoft's CPU ONNX Runtime and rembg's U2NetP
-model into the user's checkout. See section 2 and section 5 for provenance,
-license terms and unresolved weights licensing. No GPU provider is implemented.
+setup scripts separately download Microsoft's CPU ONNX Runtime, rembg's U2NetP,
+and/or EfficientSAM-Ti models into the user's checkout. See sections 2, 5 and 7
+for provenance, license terms and unresolved weights licensing. No GPU provider
+is implemented.
 
 Sections 3 and 4 describe possible future providers, not the current build.
 
@@ -259,7 +264,7 @@ END OF FILE
 ================================================================================
 
 ================================================================================
-6. EfficientSAM-Ti — OPTIONAL WEIGHTS, DOWNLOADED SEPARATELY
+7. EfficientSAM-Ti — OPTIONAL WEIGHTS, DOWNLOADED SEPARATELY
 ================================================================================
 The optional box-selection feature loads the original EfficientSAM-Ti ONNX encoder
 and decoder from the user's workspace, not from this bundle. The setup script
